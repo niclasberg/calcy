@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-annotate-snippets = "0.12.16"
+ariadne = "0.6.0"
 slotmap = "1.1.1"
 winnow = "1.0.3"

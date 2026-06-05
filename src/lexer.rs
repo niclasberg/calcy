@@ -4,8 +4,7 @@ use winnow::{
     LocatingSlice, Parser, Result,
     ascii::{float, multispace0},
     combinator::{alt, delimited, dispatch, empty, eof, fail, repeat},
-    error::ContextError,
-    stream::{AsChar, TokenSlice},
+    stream::AsChar,
     token::{any, one_of, take_while},
 };
 
@@ -14,8 +13,6 @@ pub struct Token<'s> {
     pub kind: TokenKind<'s>,
     pub span: SourceSpan,
 }
-
-pub type Tokens<'i> = TokenSlice<'i, Token<'i>>;
 
 impl<'s> PartialEq<TokenKind<'s>> for Token<'s> {
     fn eq(&self, other: &TokenKind<'s>) -> bool {
@@ -28,8 +25,6 @@ pub enum TokenKind<'s> {
     Number(f64),
     Identifier(&'s str),
     Keyword(Keyword),
-    LParen,
-    RParen,
     Op(Oper),
 }
 
@@ -39,18 +34,14 @@ impl Display for TokenKind<'_> {
             TokenKind::Number(n) => Display::fmt(n, f),
             TokenKind::Identifier(name) => f.write_str(name),
             TokenKind::Keyword(keyword) => f.write_str(keyword.as_str()),
-            TokenKind::LParen => f.write_str("("),
-            TokenKind::RParen => f.write_str(")"),
             TokenKind::Op(oper) => f.write_str(oper.as_str()),
         }
     }
 }
 
-impl<'i> Parser<Tokens<'i>, &'i Token<'i>, ContextError> for TokenKind<'i> {
-    fn parse_next(&mut self, input: &mut Tokens<'i>) -> Result<&'i Token<'i>, ContextError> {
-        any.verify(|token: &Token<'i>| token.kind == *self)
-            .parse_next(input)
-    }
+pub enum Literal {
+    Number(f64),
+    Bool(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +59,13 @@ pub enum Oper {
     LessEq,
     Greater,
     GreaterEq,
+    LParen,
+    RParen,
+    LCurlyBrace,
+    RCurlyBrace,
+    LBrace,
+    RBrace,
+    SemiColon,
 }
 
 impl Oper {
@@ -86,6 +84,13 @@ impl Oper {
             Oper::LessEq => "<=",
             Oper::Greater => ">",
             Oper::GreaterEq => ">=",
+            Oper::LParen => "(",
+            Oper::RParen => ")",
+            Oper::LCurlyBrace => "[",
+            Oper::RCurlyBrace => "]",
+            Oper::LBrace => "{",
+            Oper::RBrace => "}",
+            Oper::SemiColon => ";",
         }
     }
 }
@@ -135,6 +140,22 @@ impl From<Range<usize>> for SourceSpan {
     }
 }
 
+impl ariadne::Span for SourceSpan {
+    type SourceId = ();
+
+    fn source(&self) -> &Self::SourceId {
+        &()
+    }
+
+    fn start(&self) -> usize {
+        self.start
+    }
+
+    fn end(&self) -> usize {
+        self.end
+    }
+}
+
 pub fn tokens<'s>(i: &'s str) -> Result<Vec<Token<'s>>> {
     let (tokens, _) = (repeat(1.., delimited(multispace0, token, multispace0)), eof)
         .parse_next(&mut LocatingSlice::new(i))?;
@@ -146,31 +167,37 @@ fn token<'s>(i: &mut LocatingSlice<&'s str>) -> Result<Token<'s>> {
         identifier_or_keyword,
         float.map(TokenKind::Number),
         dispatch! {any;
-            '(' => empty.value(TokenKind::LParen),
-            ')' => empty.value(TokenKind::RParen),
-            '+' => empty.value(TokenKind::Op(Oper::Add)),
-            '-' => empty.value(TokenKind::Op(Oper::Sub)),
-            '*' => empty.value(TokenKind::Op(Oper::Mul)),
-            '/' => empty.value(TokenKind::Op(Oper::Div)),
-            '.' => empty.value(TokenKind::Op(Oper::Dot)),
+            '(' => empty.value(Oper::LParen),
+            ')' => empty.value(Oper::RParen),
+            '+' => empty.value(Oper::Add),
+            '-' => empty.value(Oper::Sub),
+            '*' => empty.value(Oper::Mul),
+            '/' => empty.value(Oper::Div),
+            '.' => empty.value(Oper::Dot),
             '<' => alt((
-                '='.value(TokenKind::Op(Oper::LessEq)),
-                empty.value(TokenKind::Op(Oper::Less))
+                '='.value(Oper::LessEq),
+                empty.value(Oper::Less)
             )),
             '>' => alt((
-                '='.value(TokenKind::Op(Oper::GreaterEq)),
-                empty.value(TokenKind::Op(Oper::Greater))
+                '='.value(Oper::GreaterEq),
+                empty.value(Oper::Greater)
             )),
             '!' => alt((
-                '='.value(TokenKind::Op(Oper::NotEq)),
-                empty.value(TokenKind::Op(Oper::Not))
+                '='.value(Oper::NotEq),
+                empty.value(Oper::Not)
             )),
             '=' => alt((
-                '='.value(TokenKind::Op(Oper::Eq)),
-                empty.value(TokenKind::Op(Oper::Assign))
+                '='.value(Oper::Eq),
+                empty.value(Oper::Assign)
             )),
+            '[' => empty.value(Oper::LBrace),
+            ']' => empty.value(Oper::RBrace),
+            '{' => empty.value(Oper::LCurlyBrace),
+            '}' => empty.value(Oper::RCurlyBrace),
+            ';' => empty.value(Oper::SemiColon),
             _ => fail
-        },
+        }
+        .map(TokenKind::Op),
     ))
     .with_span()
     .map(|(kind, span)| Token {
@@ -205,8 +232,8 @@ mod tests {
     fn parse_tokens() {
         let input = "( )\t+\n- if --10 else */ <=<<=>>=fn banana";
         let expected_tokens = vec![
-            TokenKind::LParen,
-            TokenKind::RParen,
+            TokenKind::Op(Oper::LParen),
+            TokenKind::Op(Oper::RParen),
             TokenKind::Op(Oper::Add),
             TokenKind::Op(Oper::Sub),
             TokenKind::Keyword(Keyword::If),
