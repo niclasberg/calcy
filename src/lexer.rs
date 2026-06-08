@@ -22,8 +22,8 @@ impl<'s> PartialEq<TokenKind<'s>> for Token<'s> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind<'s> {
-    Number(f64),
     Identifier(&'s str),
+    Literal(Literal),
     Keyword(Keyword),
     Op(Oper),
 }
@@ -31,7 +31,7 @@ pub enum TokenKind<'s> {
 impl Display for TokenKind<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TokenKind::Number(n) => Display::fmt(n, f),
+            TokenKind::Literal(n) => Display::fmt(n, f),
             TokenKind::Identifier(name) => f.write_str(name),
             TokenKind::Keyword(keyword) => f.write_str(keyword.as_str()),
             TokenKind::Op(oper) => f.write_str(oper.as_str()),
@@ -39,9 +39,19 @@ impl Display for TokenKind<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Literal {
     Number(f64),
     Bool(bool),
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Number(value) => Display::fmt(value, f),
+            Literal::Bool(value) => Display::fmt(value, f),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,8 +110,6 @@ pub enum Keyword {
     If,
     Else,
     Fn,
-    True,
-    False,
 }
 
 impl Keyword {
@@ -110,8 +118,6 @@ impl Keyword {
             Keyword::If => "if",
             Keyword::Else => "else",
             Keyword::Fn => "fn",
-            Keyword::True => "true",
-            Keyword::False => "false",
         }
     }
 }
@@ -165,7 +171,7 @@ pub fn tokens<'s>(i: &'s str) -> Result<Vec<Token<'s>>> {
 fn token<'s>(i: &mut LocatingSlice<&'s str>) -> Result<Token<'s>> {
     alt((
         identifier_or_keyword,
-        float.map(TokenKind::Number),
+        float.map(|value| TokenKind::Literal(Literal::Number(value))),
         dispatch! {any;
             '(' => empty.value(Oper::LParen),
             ')' => empty.value(Oper::RParen),
@@ -217,8 +223,8 @@ fn identifier_or_keyword<'s>(i: &mut LocatingSlice<&'s str>) -> Result<TokenKind
             "if" => TokenKind::Keyword(Keyword::If),
             "else" => TokenKind::Keyword(Keyword::Else),
             "fn" => TokenKind::Keyword(Keyword::Fn),
-            "true" => TokenKind::Keyword(Keyword::True),
-            "false" => TokenKind::Keyword(Keyword::False),
+            "true" => TokenKind::Literal(Literal::Bool(true)),
+            "false" => TokenKind::Literal(Literal::Bool(false)),
             _ => TokenKind::Identifier(id),
         })
         .parse_next(i)
@@ -238,7 +244,7 @@ mod tests {
             TokenKind::Op(Oper::Sub),
             TokenKind::Keyword(Keyword::If),
             TokenKind::Op(Oper::Sub),
-            TokenKind::Number(-10.0),
+            TokenKind::Literal(Literal::Number(-10.0)),
             TokenKind::Keyword(Keyword::Else),
             TokenKind::Op(Oper::Mul),
             TokenKind::Op(Oper::Div),
@@ -250,8 +256,8 @@ mod tests {
             TokenKind::Keyword(Keyword::Fn),
             TokenKind::Identifier("banana"),
         ];
-        let mut i = input;
-        let tokens = tokens(&mut i).unwrap();
+        let i = input;
+        let tokens = tokens(i).unwrap();
         let token_kinds: Vec<_> = tokens.into_iter().map(|token| token.kind).collect();
         assert_eq!(token_kinds, expected_tokens);
     }

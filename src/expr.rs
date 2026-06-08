@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::lexer::{Keyword, Oper, SourceSpan, Token, TokenKind};
+use crate::lexer::{Keyword, Literal, Oper, SourceSpan, Token, TokenKind};
 
 pub struct Expressions {
     exprs: Vec<Expr>,
@@ -51,19 +51,20 @@ impl Expressions {
     ) -> Result<ExprId, ParseError> {
         let token = i.next()?;
         let mut lhs = match token.kind {
-            TokenKind::Number(value) => self.push_expr(ExprKind::Number(value), token.span),
+            TokenKind::Literal(value) => match value {
+                Literal::Bool(value) => self.push_expr(ExprKind::Bool(value), token.span),
+                Literal::Number(value) => self.push_expr(ExprKind::Number(value), token.span),
+            },
             TokenKind::Identifier(name) => {
                 self.push_expr(ExprKind::Identifier(Rc::from(name)), token.span)
             }
             TokenKind::Keyword(keyword) => match keyword {
                 Keyword::If => todo!(),
-                Keyword::True => self.push_expr(ExprKind::Bool(true), token.span),
-                Keyword::False => self.push_expr(ExprKind::Bool(false), token.span),
                 _ => {
                     return Err(ParseError::unexpected_token(token, "expression"));
                 }
             },
-            TokenKind::Op(op) if op == Oper::LParen => {
+            TokenKind::Op(Oper::LParen) => {
                 let inner = self.parse_expr(i, 0)?;
                 let closing_paren = i.expect_token(TokenKind::Op(Oper::RParen))?;
                 self.push_expr(ExprKind::Paren(inner), token.span.join(&closing_paren.span))
@@ -75,7 +76,6 @@ impl Expressions {
                 let inner = self.parse_expr(i, bp)?;
                 self.push_expr(ExprKind::Unary { op, operand: inner }, token.span)
             }
-            _ => return Err(ParseError::unexpected_token(token, "expression")),
         };
 
         while let Some(token) = i.peek() {

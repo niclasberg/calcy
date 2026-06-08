@@ -197,21 +197,18 @@ fn eval(expr: ExprView, cx: &mut Context) -> Result<Value, RuntimeError> {
         ExprKind::Bool(value) => Ok(Value::Bool(*value)),
         ExprKind::Binary { op, lhs, rhs } => {
             let rhs = eval(expr.with_id(*rhs), cx)?;
-            match op {
-                BinaryOp::Assign => {
-                    let identifier = match expr.with_id(*lhs).expr() {
-                        ExprKind::Identifier(id) => id.clone(),
-                        _ => {
-                            return Err(RuntimeError::new(
-                                format!("Expected identifier"),
-                                expr.source_span(),
-                            ));
-                        }
-                    };
-                    cx.set_symbol(identifier, rhs);
-                    return Ok(Value::Unit);
-                }
-                _ => {}
+            if op == &BinaryOp::Assign {
+                let identifier = match expr.with_id(*lhs).expr() {
+                    ExprKind::Identifier(id) => id.clone(),
+                    _ => {
+                        return Err(RuntimeError::new(
+                            format!("Expected identifier, found {}", op),
+                            expr.source_span(),
+                        ));
+                    }
+                };
+                cx.set_symbol(identifier, rhs);
+                return Ok(Value::Unit);
             };
 
             let lhs = eval(expr.with_id(*lhs), cx)?;
