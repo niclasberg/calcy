@@ -76,6 +76,7 @@ pub enum Oper {
     LBrace,
     RBrace,
     SemiColon,
+    Comma,
 }
 
 impl Oper {
@@ -101,6 +102,7 @@ impl Oper {
             Oper::LBrace => "{",
             Oper::RBrace => "}",
             Oper::SemiColon => ";",
+            Oper::Comma => ",",
         }
     }
 }
@@ -201,6 +203,7 @@ fn token<'s>(i: &mut LocatingSlice<&'s str>) -> Result<Token<'s>> {
             '{' => empty.value(Oper::LCurlyBrace),
             '}' => empty.value(Oper::RCurlyBrace),
             ';' => empty.value(Oper::SemiColon),
+            ',' => empty.value(Oper::Comma),
             _ => fail
         }
         .map(TokenKind::Op),

@@ -1,24 +1,17 @@
-use std::collections::HashMap;
+use lasso::Rodeo;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct Atom(usize);
 
-pub struct AtomMap<'s> {
-    atoms: Vec<&'s str>,
-    str_lookup: HashMap<&'s str, usize>,
-}
-
-impl<'s> AtomMap<'s> {
-    pub fn get_or_insert(&mut self, str: &'s str) -> Atom {
-        let id = self.str_lookup.entry(str).or_insert_with(|| {
-            let id = self.atoms.len();
-            self.atoms.push(str);
-            id
-        });
-        Atom(*id)
+unsafe impl lasso::Key for Atom {
+    fn into_usize(self) -> usize {
+        self.0
     }
 
-    pub fn get(&self, atom: Atom) -> &str {
-        &self.atoms[atom.0]
+    fn try_from_usize(int: usize) -> Option<Self> {
+        Some(Self(int))
     }
 }
+
+pub type Atoms = Rodeo<Atom>;

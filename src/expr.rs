@@ -1,17 +1,27 @@
 use std::{
+    cell::Cell,
+    collections::{HashSet, VecDeque},
     fmt::{Debug, Display},
-    rc::Rc,
 };
 
-use crate::lexer::{Keyword, Literal, Oper, SourceSpan, Token, TokenKind};
+use crate::{
+    atom::{Atom, Atoms},
+    lexer::{Keyword, Literal, Oper, SourceSpan, Token, TokenKind},
+};
 
 pub struct Expressions {
     exprs: Vec<Expr>,
+    atoms: Atoms,
+    id_buffer: Cell<VecDeque<ExprId>>,
 }
 
 impl Expressions {
     pub fn new() -> Self {
-        Self { exprs: Vec::new() }
+        Self {
+            exprs: Vec::new(),
+            atoms: Atoms::new(),
+            id_buffer: Cell::new(VecDeque::new()),
+        }
     }
 
     pub fn parse<'s>(&'s mut self, tokens: &[Token]) -> Result<ExprView<'s>, ParseError> {
@@ -56,10 +66,43 @@ impl Expressions {
                 Literal::Number(value) => self.push_expr(ExprKind::Number(value), token.span),
             },
             TokenKind::Identifier(name) => {
-                self.push_expr(ExprKind::Identifier(Rc::from(name)), token.span)
+                let atom = self.atoms.get_or_intern(name);
+                self.push_expr(ExprKind::Identifier(atom), token.span)
             }
             TokenKind::Keyword(keyword) => match keyword {
                 Keyword::If => todo!(),
+                Keyword::Fn => {
+                    let mut span = token.span;
+                    i.expect_token(TokenKind::Op(Oper::LParen))?;
+
+                    let mut args = Vec::new();
+                    while let Some(t) = i.peek() {
+                        let TokenKind::Identifier(id) = t.kind else {
+                            break;
+                        };
+                        i.next()?;
+                        args.push(self.atoms.get_or_intern(id));
+
+                        if !i.match_token(TokenKind::Op(Oper::Comma)).is_some() {
+                            break;
+                        }
+                    }
+                    i.expect_token(TokenKind::Op(Oper::RParen))?;
+
+                    let body = self.parse_expr(i, 0)?;
+                    let mut captures = HashSet::new();
+                    self.find_captures(body, &mut |atom| {
+                        if !args.contains(&atom) {
+                            captures.insert(atom);
+                        }
+                    });
+                    let fn_def = FunctionDef {
+                        args,
+                        body,
+                        captures,
+                    };
+                    self.push_expr(ExprKind::FunctionDef(fn_def), span)
+                }
                 _ => {
                     return Err(ParseError::unexpected_token(token, "expression"));
                 }
@@ -83,6 +126,35 @@ impl Expressions {
                 TokenKind::Op(op) => op,
                 _ => return Err(ParseError::unexpected_token(token, "operator")),
             };
+
+            if let Some((op, binding_power)) = postfix_op(op) {
+                if binding_power < min_binding_power {
+                    break;
+                }
+                i.next()?;
+                match op {
+                    PostfixOp::FunctionCall => {
+                        let mut args = Vec::new();
+                        if i.peek()
+                            .is_some_and(|t| t.kind != TokenKind::Op(Oper::RParen))
+                        {
+                            loop {
+                                args.push(self.parse_expr(i, 0)?);
+                                if !i.match_token(TokenKind::Op(Oper::Comma)).is_some() {
+                                    break;
+                                }
+                            }
+                        }
+
+                        i.expect_token(TokenKind::Op(Oper::RParen))?;
+                        lhs = self.push_expr(
+                            ExprKind::FunctionCall { func: lhs, args },
+                            self.expr_span(lhs, &[]),
+                        );
+                        continue;
+                    }
+                }
+            }
 
             if let Some((op, left_binding_power, right_binding_power)) = infix_op(op) {
                 if left_binding_power < min_binding_power {
@@ -109,6 +181,32 @@ impl Expressions {
             span = span.join(&self.get_expr(*expr).unwrap().span);
         }
         span
+    }
+
+    fn find_captures(&self, id: ExprId, f: &mut impl FnMut(Atom)) {
+        let mut rem = self.id_buffer.take();
+        rem.clear();
+        rem.push_back(id);
+        while let Some(id) = rem.pop_front() {
+            match &self.exprs[id.0].kind {
+                ExprKind::Identifier(atom) => f(*atom),
+                ExprKind::Number(_) | ExprKind::Bool(_) => {}
+                ExprKind::Paren(expr_id) => rem.push_back(*expr_id),
+                ExprKind::FunctionCall { args, .. } => rem.extend(args.iter()),
+                ExprKind::FunctionDef(function_def) => {
+                    for c in function_def.captures.iter() {
+                        f(*c)
+                    }
+                }
+                ExprKind::Unary { operand, .. } => rem.push_back(*operand),
+                ExprKind::Binary { lhs, rhs, .. } => {
+                    rem.push_back(*lhs);
+                    rem.push_back(*rhs);
+                }
+                ExprKind::Block { children } => rem.extend(children.iter()),
+            }
+        }
+        self.id_buffer.set(rem);
     }
 
     fn push_expr(&mut self, kind: ExprKind, span: SourceSpan) -> ExprId {
@@ -146,6 +244,19 @@ impl<'i> TokenStream<'i> {
 
     fn peek(&self) -> Option<&'i Token<'i>> {
         self.tokens.first()
+    }
+
+    fn match_token(&mut self, kind: TokenKind) -> Option<&'i Token<'i>> {
+        if let Some((first, rem)) = self.tokens.split_first() {
+            if first.kind == kind {
+                self.tokens = rem;
+                Some(first)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn expect(
@@ -196,6 +307,13 @@ const fn infix_op(op: Oper) -> Option<(BinaryOp, u8, u8)> {
     }
 }
 
+const fn postfix_op(op: Oper) -> Option<(PostfixOp, u8)> {
+    match op {
+        Oper::LParen => Some((PostfixOp::FunctionCall, 30)),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExprId(usize);
 
@@ -213,10 +331,15 @@ pub struct Expr {
 
 #[derive(Debug, PartialEq)]
 pub enum ExprKind {
-    Identifier(Rc<str>),
+    Identifier(Atom),
     Number(f64),
     Bool(bool),
     Paren(ExprId),
+    FunctionCall {
+        func: ExprId,
+        args: Vec<ExprId>,
+    },
+    FunctionDef(FunctionDef),
     Unary {
         op: UnaryOp,
         operand: ExprId,
@@ -249,17 +372,17 @@ pub enum BinaryOp {
 impl BinaryOp {
     pub const fn as_str(&self) -> &'static str {
         match self {
-            BinaryOp::Add => "Add",
-            BinaryOp::Sub => "Sub",
-            BinaryOp::Mul => "Mul",
-            BinaryOp::Div => "Div",
-            BinaryOp::Eq => "Eq",
-            BinaryOp::NotEq => "NotEq",
-            BinaryOp::Less => "Less",
-            BinaryOp::LessEq => "LessEq",
-            BinaryOp::Greater => "Greater",
-            BinaryOp::GreaterEq => "GreaterEq",
-            BinaryOp::Assign => "Assign",
+            BinaryOp::Add => "+",
+            BinaryOp::Sub => "-",
+            BinaryOp::Mul => "*",
+            BinaryOp::Div => "/",
+            BinaryOp::Eq => "==",
+            BinaryOp::NotEq => "!=",
+            BinaryOp::Less => "<",
+            BinaryOp::LessEq => "<=",
+            BinaryOp::Greater => ">",
+            BinaryOp::GreaterEq => ">=",
+            BinaryOp::Assign => "=",
         }
     }
 }
@@ -283,6 +406,18 @@ impl UnaryOp {
             UnaryOp::Not => "Not",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PostfixOp {
+    FunctionCall,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FunctionDef {
+    pub args: Vec<Atom>,
+    pub captures: HashSet<Atom>,
+    pub body: ExprId,
 }
 
 #[derive(Clone, Copy)]
@@ -311,7 +446,10 @@ impl<'a> ExprView<'a> {
 impl<'a> Debug for ExprView<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.expr() {
-            ExprKind::Identifier(arg0) => f.debug_tuple("Identifier").field(arg0).finish(),
+            ExprKind::Identifier(atom) => f
+                .debug_tuple("Identifier")
+                .field(&self.exprs.atoms.resolve(atom))
+                .finish(),
             ExprKind::Number(arg0) => f.debug_tuple("Number").field(arg0).finish(),
             ExprKind::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
             ExprKind::Unary { op, operand } => f
@@ -327,7 +465,12 @@ impl<'a> Debug for ExprView<'a> {
                 .debug_tuple("Paren")
                 .field(&self.with_id(*expr_id))
                 .finish(),
-            ExprKind::Block { children } => f.debug_tuple("Block").finish(),
+            ExprKind::Block { .. } => f.debug_tuple("Block").finish(),
+            ExprKind::FunctionCall { func, args } => f
+                .debug_struct("FunctionCall")
+                .field("func", &self.with_id(*func))
+                .finish(),
+            ExprKind::FunctionDef(_) => todo!(),
         }
     }
 }
@@ -358,4 +501,65 @@ impl ParseError {
 pub enum ParseErrorKind {
     UnexpectedToken { found: String, expected: String },
     UnexpectedEOF,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::{Formatter, Write};
+
+    use crate::lexer::tokens;
+
+    use super::*;
+
+    fn fmt_ast(e: ExprView, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match e.expr() {
+            ExprKind::Identifier(atom) => {
+                write!(f, "ID {}", e.exprs.atoms.resolve(atom))
+            }
+            ExprKind::Number(n) => write!(f, "{}", n),
+            ExprKind::Bool(v) => write!(f, "{}", v),
+            ExprKind::Paren(expr_id) => {
+                f.write_char('(')?;
+                fmt_ast(e.with_id(*expr_id), f)?;
+                f.write_char(')')
+            }
+            ExprKind::FunctionCall { func, args } => todo!(),
+            ExprKind::FunctionDef(function_def) => todo!(),
+            ExprKind::Unary { op, operand } => {
+                write!(f, "({} ", op.as_str())?;
+                fmt_ast(e.with_id(*operand), f)?;
+                f.write_char(')')
+            }
+            ExprKind::Binary { lhs, op, rhs } => {
+                write!(f, "({} ", op.as_str())?;
+                fmt_ast(e.with_id(*lhs), f)?;
+                f.write_char(' ')?;
+                fmt_ast(e.with_id(*rhs), f)?;
+                f.write_char(')')
+            }
+            ExprKind::Block { .. } => todo!(),
+        }
+    }
+
+    struct TestPrinter<'a>(ExprView<'a>);
+    impl<'a> Display for TestPrinter<'a> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            fmt_ast(self.0, f)
+        }
+    }
+
+    fn parse_and_fmt(i: &str) -> String {
+        let tokens = tokens(i).unwrap();
+        let mut expressions = Expressions::new();
+        let e = expressions.parse(&tokens).unwrap();
+        TestPrinter(e).to_string()
+    }
+
+    #[test]
+    fn binary_op_parsing() {
+        assert_eq!(parse_and_fmt("1 + 1"), "(+ 1 1)");
+        assert_eq!(parse_and_fmt("1 + 1 < 5"), "(< (+ 1 1) 5)");
+        assert_eq!(parse_and_fmt("1 * 2 + 1"), "(+ (* 1 2) 1)");
+        assert_eq!(parse_and_fmt("1 + 1 * 2"), "(+ 1 (* 1 2))");
+    }
 }
