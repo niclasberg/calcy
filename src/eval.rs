@@ -58,8 +58,9 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
         ExprKind::Binary { op, lhs, rhs } => {
             let rhs = eval(expr.with_id(*rhs), cx)?;
             if op == &BinaryOp::Assign {
-                let identifier = match expr.with_id(*lhs).expr() {
-                    ExprKind::Identifier(id) => id.clone(),
+                let id_expr = expr.with_id(*lhs);
+                let identifier = match id_expr.expr() {
+                    ExprKind::Identifier(id) => *id,
                     _ => {
                         return Err(RuntimeError::new(
                             "Expected identifier",
@@ -68,6 +69,15 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                         ));
                     }
                 };
+
+                if !cx.has_symbol(identifier) {
+                    return Err(RuntimeError::new(
+                        "Undefined symbol",
+                        format!("Symbol {} not defined in the current scope", "asdf"),
+                        id_expr.source_span(),
+                    ));
+                }
+
                 cx.set_symbol(identifier, rhs);
                 return Ok(Value::Unit);
             };
@@ -88,7 +98,6 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                 BinaryOp::Assign => unreachable!(),
             }
         }
-        ExprKind::Paren(inner) => eval(expr.with_id(*inner), cx),
         ExprKind::Unary { op, operand } => {
             let inner = eval(expr.with_id(*operand), cx)?;
             match op {
@@ -102,6 +111,11 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
             }
             eval(expr.with_id(*children.last().unwrap()), cx)
         }),
+        ExprKind::Let { id, value } => {
+            let value = eval(expr.with_id(*value), cx)?;
+            cx.set_symbol(*id, value);
+            Ok(Value::Unit)
+        }
         ExprKind::FunctionCall { func, args } => {
             let f = eval(expr.with_id(*func), cx)?;
             let arg_exprs = args;
@@ -142,17 +156,21 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                 eval(expr.with_id(def), cx)
             })
         }
-        ExprKind::FunctionDef(def) => {
-            let mut captures = HashMap::new();
-            for &capture in def.captures.iter() {
+        ExprKind::FunctionDef {
+            captures,
+            args,
+            body,
+        } => {
+            let mut captured_values = HashMap::new();
+            for &capture in captures.iter() {
                 let value = cx.get_symbol(capture).unwrap();
-                captures.insert(capture, value);
+                captured_values.insert(capture, value);
             }
 
             Ok(Value::Fn {
-                args: def.args.clone(),
-                def: def.body,
-                captures,
+                args: args.clone(),
+                def: *body,
+                captures: captured_values,
             })
         }
     }
@@ -168,6 +186,10 @@ impl EvalContext {
         Self {
             symbols: Default::default(),
         }
+    }
+
+    fn has_symbol(&mut self, identifier: Atom) -> bool {
+        self.symbols.contains_key(&identifier)
     }
 
     fn set_symbol(&mut self, identifier: Atom, value: Value) {

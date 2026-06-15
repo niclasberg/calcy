@@ -29,9 +29,9 @@ fn format_error(err: &ParseError) -> Report<'_, SourceSpan> {
 
 fn main() {
     let source = "
-        a = 2 + -2; 
-        k = a + 1; 
-        a = fn(a, b) fn(k) (a + b + k); 
+        let a = 2 + -2; 
+        let k = a + 1; 
+        a = fn(a, b) fn(k) (let d = a + b + k; d); 
         a(15, 4)(40)
     ";
     let tokens = tokens(source).unwrap();

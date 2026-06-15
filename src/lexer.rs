@@ -1,9 +1,9 @@
 use std::{fmt::Display, ops::Range};
 
 use winnow::{
-    LocatingSlice, Parser, Result,
+    Parser, Result,
     ascii::{float, multispace0},
-    combinator::{alt, delimited, dispatch, empty, eof, fail, repeat},
+    combinator::{alt, dispatch, empty, fail},
     stream::AsChar,
     token::{any, one_of, take_while},
 };
@@ -26,6 +26,7 @@ pub enum TokenKind<'s> {
     Literal(Literal),
     Keyword(Keyword),
     Op(Oper),
+    Eof,
 }
 
 impl Display for TokenKind<'_> {
@@ -35,6 +36,7 @@ impl Display for TokenKind<'_> {
             TokenKind::Identifier(name) => f.write_str(name),
             TokenKind::Keyword(keyword) => f.write_str(keyword.as_str()),
             TokenKind::Op(oper) => f.write_str(oper.as_str()),
+            TokenKind::Eof => f.write_str("EOF"),
         }
     }
 }
@@ -112,6 +114,7 @@ pub enum Keyword {
     If,
     Else,
     Fn,
+    Let,
 }
 
 impl Keyword {
@@ -120,6 +123,7 @@ impl Keyword {
             Keyword::If => "if",
             Keyword::Else => "else",
             Keyword::Fn => "fn",
+            Keyword::Let => "let",
         }
     }
 }
@@ -165,12 +169,24 @@ impl ariadne::Span for SourceSpan {
 }
 
 pub fn tokens<'s>(i: &'s str) -> Result<Vec<Token<'s>>> {
-    let (tokens, _) = (repeat(1.., delimited(multispace0, token, multispace0)), eof)
-        .parse_next(&mut LocatingSlice::new(i))?;
+    let mut tokens = Vec::new();
+    let mut slice = i;
+    while !slice.is_empty() {
+        multispace0(&mut slice)?;
+        if !slice.is_empty() {
+            let start = i.len() - slice.len();
+            let token = token(&mut slice)?;
+            let end = i.len() - slice.len();
+            tokens.push(Token {
+                kind: token,
+                span: SourceSpan { start, end },
+            });
+        }
+    }
     Ok(tokens)
 }
 
-fn token<'s>(i: &mut LocatingSlice<&'s str>) -> Result<Token<'s>> {
+fn token<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
     alt((
         identifier_or_keyword,
         float.map(|value| TokenKind::Literal(Literal::Number(value))),
@@ -208,15 +224,10 @@ fn token<'s>(i: &mut LocatingSlice<&'s str>) -> Result<Token<'s>> {
         }
         .map(TokenKind::Op),
     ))
-    .with_span()
-    .map(|(kind, span)| Token {
-        kind,
-        span: span.into(),
-    })
     .parse_next(i)
 }
 
-fn identifier_or_keyword<'s>(i: &mut LocatingSlice<&'s str>) -> Result<TokenKind<'s>> {
+fn identifier_or_keyword<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
     (
         one_of(|c: char| c.is_alpha() || c == '_'),
         take_while(0.., |c: char| c.is_alphanum() || c == '_'),
@@ -226,6 +237,7 @@ fn identifier_or_keyword<'s>(i: &mut LocatingSlice<&'s str>) -> Result<TokenKind
             "if" => TokenKind::Keyword(Keyword::If),
             "else" => TokenKind::Keyword(Keyword::Else),
             "fn" => TokenKind::Keyword(Keyword::Fn),
+            "let" => TokenKind::Keyword(Keyword::Let),
             "true" => TokenKind::Literal(Literal::Bool(true)),
             "false" => TokenKind::Literal(Literal::Bool(false)),
             _ => TokenKind::Identifier(id),
