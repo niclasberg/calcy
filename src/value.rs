@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Write},
+};
 
 use crate::{atom::Atom, eval::RuntimeError, expr::ExprId, lexer::SourceSpan, types::Type};
 
@@ -12,6 +15,7 @@ pub enum Value {
         captures: HashMap<Atom, Value>,
         def: ExprId,
     },
+    Array(Vec<Value>),
 }
 
 impl Value {
@@ -21,6 +25,7 @@ impl Value {
             Value::Bool(_) => Type::Bool,
             Value::Number(_) => Type::Number,
             Value::Fn { .. } => Type::Fn,
+            Value::Array(..) => Type::Array,
         }
     }
 
@@ -158,6 +163,20 @@ impl Display for Value {
             Value::Bool(value) => f.write_str(if *value { "true" } else { "false" }),
             Value::Number(value) => Display::fmt(value, f),
             Value::Fn { .. } => f.write_str("fn"),
+            Value::Array(values) => {
+                f.write_char('[')?;
+                let mut first = true;
+                for value in values.iter() {
+                    if !first {
+                        write!(f, ", {}", value)?;
+                    } else {
+                        write!(f, "{}", value)?;
+                    }
+                    first = false;
+                }
+                f.write_char(']')?;
+                Ok(())
+            }
         }
     }
 }

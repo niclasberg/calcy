@@ -25,7 +25,7 @@ impl Expressions {
         }
     }
 
-    pub fn parse(&mut self, tokens: &[Token]) -> Result<Expr, ParseError> {
+    pub fn parse(&mut self, tokens: &[Token]) -> Result<ExprId, ParseError> {
         let eof_token = Token {
             kind: TokenKind::Eof,
             span: tokens
@@ -40,7 +40,7 @@ impl Expressions {
         };
         let expr = self.parse_block(&mut token_stream)?;
         token_stream.expect_token(TokenKind::Eof)?;
-        Ok(expr)
+        Ok(self.push_expr(expr))
     }
 
     /// Parse multiple ;-separated expressions
@@ -144,6 +144,21 @@ impl Expressions {
                 i.expect_token(TokenKind::Op(Oper::RParen))?;
                 expr
             }
+            TokenKind::Op(Oper::LBracket) => {
+                let mut values = Vec::new();
+                if i.peek().kind != TokenKind::Op(Oper::RBracket) {
+                    loop {
+                        let expr = self.parse_expr(i, 0)?;
+                        values.push(self.push_expr(expr));
+                        if i.match_token(TokenKind::Op(Oper::Comma)).is_none() {
+                            break;
+                        }
+                    }
+                }
+                let rbracket_token = i.expect_token(TokenKind::Op(Oper::RBracket))?;
+                let span = token.span.join(&rbracket_token.span);
+                Expr::new(ExprKind::Array(values), span)
+            }
             TokenKind::Op(op) => {
                 let Some((op, bp)) = prefix_op(op) else {
                     return Err(ParseError::unexpected_token(token, "expression"));
@@ -175,7 +190,8 @@ impl Expressions {
                     break;
                 }
                 i.next();
-                match op {
+
+                lhs = match op {
                     PostfixOp::FunctionCall => {
                         let mut args = Vec::new();
                         if i.peek().kind != TokenKind::Op(Oper::RParen) {
@@ -190,16 +206,20 @@ impl Expressions {
 
                         let r_paren_token = i.expect_token(TokenKind::Op(Oper::RParen))?;
                         let span = lhs.span.join(&r_paren_token.span);
-                        lhs = Expr::new(
+                        Expr::new(
                             ExprKind::FunctionCall {
                                 func: self.push_expr(lhs),
                                 args,
                             },
                             span,
-                        );
-                        continue;
+                        )
                     }
-                }
+                    PostfixOp::Index => {
+                        i.expect_token(TokenKind::Op(Oper::RBracket))?;
+                        todo!()
+                    }
+                };
+                continue;
             }
 
             if let Some((op, left_binding_power, right_binding_power)) = infix_op(op) {
@@ -244,6 +264,7 @@ impl Expressions {
                     rem.push_back(*value);
                 }
                 ExprKind::Number(_) | ExprKind::Bool(_) => {}
+                ExprKind::Array(children) => rem.extend(children),
                 ExprKind::FunctionCall { args, .. } => rem.extend(args.iter()),
                 ExprKind::FunctionDef { captures, .. } => {
                     for c in captures.iter() {
@@ -271,6 +292,10 @@ impl Expressions {
 
     pub fn get_expr(&self, id: ExprId) -> Option<&Expr> {
         self.exprs.get(id.0)
+    }
+
+    pub fn view(&self, id: ExprId) -> ExprView<'_> {
+        ExprView { id, exprs: &self }
     }
 }
 
@@ -394,6 +419,7 @@ const fn infix_op(op: Oper) -> Option<(BinaryOp, u8, u8)> {
 const fn postfix_op(op: Oper) -> Option<(PostfixOp, u8)> {
     match op {
         Oper::LParen => Some((PostfixOp::FunctionCall, 30)),
+        Oper::LBracket => Some((PostfixOp::Index, 30)),
         _ => None,
     }
 }
@@ -424,6 +450,7 @@ pub enum ExprKind {
     Identifier(Atom),
     Number(f64),
     Bool(bool),
+    Array(Vec<ExprId>),
     FunctionCall {
         func: ExprId,
         args: Vec<ExprId>,
@@ -508,6 +535,7 @@ impl UnaryOp {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PostfixOp {
     FunctionCall,
+    Index,
 }
 
 #[derive(Clone, Copy)]
@@ -558,6 +586,7 @@ impl<'a> Debug for ExprView<'a> {
                 .finish(),
             ExprKind::FunctionDef { .. } => todo!(),
             ExprKind::Let { id, value } => todo!(),
+            ExprKind::Array(..) => todo!(),
         }
     }
 }
@@ -599,10 +628,11 @@ mod tests {
     use super::*;
 
     fn fmt_ast(
-        expr: &Expr,
+        id: ExprId,
         expressions: &Expressions,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
+        let expr = &expressions[id];
         match &expr.kind {
             ExprKind::Identifier(atom) => {
                 write!(f, "ID {}", expressions.atoms.resolve(atom))
@@ -613,22 +643,23 @@ mod tests {
             ExprKind::FunctionDef { .. } => todo!(),
             ExprKind::Unary { op, operand } => {
                 write!(f, "({} ", op.as_str())?;
-                fmt_ast(&expressions[*operand], expressions, f)?;
+                fmt_ast(*operand, expressions, f)?;
                 f.write_char(')')
             }
             ExprKind::Binary { lhs, op, rhs } => {
                 write!(f, "({} ", op.as_str())?;
-                fmt_ast(&expressions[*lhs], expressions, f)?;
+                fmt_ast(*lhs, expressions, f)?;
                 f.write_char(' ')?;
-                fmt_ast(&expressions[*rhs], expressions, f)?;
+                fmt_ast(*rhs, expressions, f)?;
                 f.write_char(')')
             }
             ExprKind::Block { .. } => todo!(),
             ExprKind::Let { .. } => todo!(),
+            ExprKind::Array(..) => todo!(),
         }
     }
 
-    struct TestPrinter<'a>(&'a Expr, &'a Expressions);
+    struct TestPrinter<'a>(ExprId, &'a Expressions);
     impl<'a> Display for TestPrinter<'a> {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
             fmt_ast(self.0, self.1, f)
@@ -638,8 +669,8 @@ mod tests {
     fn parse_and_fmt(i: &str) -> String {
         let tokens = tokens(i).unwrap();
         let mut expressions = Expressions::new();
-        let e = expressions.parse(&tokens).unwrap();
-        TestPrinter(&e, &expressions).to_string()
+        let expr_id = expressions.parse(&tokens).unwrap();
+        TestPrinter(expr_id, &expressions).to_string()
     }
 
     #[test]

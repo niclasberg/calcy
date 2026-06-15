@@ -12,6 +12,7 @@ pub enum Type {
     Unit,
     Bool,
     Number,
+    Array,
     Fn,
     // The set must have at least 2 members
     Enum(BTreeSet<Type>),
@@ -86,6 +87,7 @@ impl Display for Type {
             Type::Any => f.write_str("Any"),
             Type::Bool => f.write_str("Bool"),
             Type::Number => f.write_str("Number"),
+            Type::Array => f.write_str("Array"),
             Type::Enum(alts) => {
                 for alt in alts.iter().take(alts.len() - 1) {
                     alt.fmt(f)?;

@@ -2,7 +2,7 @@ use ariadne::{Label, Report, Source};
 
 use crate::{
     eval::EvalContext,
-    expr::{Expressions, ParseError},
+    expr::{ExprView, Expressions, ParseError},
     lexer::{SourceSpan, tokens},
 };
 
@@ -29,9 +29,17 @@ fn format_error(err: &ParseError) -> Report<'_, SourceSpan> {
 
 fn main() {
     let source = "
+        type A = #{
+            a: Num,
+            b: Bool,
+        };
         let a = 2 + -2; 
         let k = a + 1; 
-        a = fn(a, b) fn(k) (let d = a + b + k; d); 
+        a = fn(a, b) 
+            fn(k) (
+                let d = a + b + k; 
+                [[a, a], b, k, d<a]
+            ); 
         a(15, 4)(40)
     ";
     let tokens = tokens(source).unwrap();
@@ -46,7 +54,7 @@ fn main() {
     };
 
     let mut cx = EvalContext::new();
-    let value = match eval::eval(expr, &mut cx) {
+    let value = match eval::eval(expr, &exprs, &mut cx) {
         Ok(value) => value,
         Err(err) => {
             Report::build(ariadne::ReportKind::Error, err.span)
@@ -58,5 +66,5 @@ fn main() {
             return;
         }
     };
-    println!("{:?} -> {:?}", expr, value);
+    println!("{:?} -> {:?}", exprs.view(expr), value);
 }

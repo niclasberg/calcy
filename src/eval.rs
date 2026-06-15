@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Display};
 
 use crate::{
     atom::Atom,
-    expr::{BinaryOp, ExprKind, ExprView, UnaryOp},
+    expr::{BinaryOp, ExprId, ExprKind, Expressions, UnaryOp},
     lexer::SourceSpan,
     types::Type,
     value::Value,
@@ -44,28 +44,40 @@ impl Display for RuntimeError {
 
 impl Error for RuntimeError {}
 
-pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError> {
-    match expr.expr() {
+pub fn eval(
+    id: ExprId,
+    expressions: &Expressions,
+    cx: &mut EvalContext,
+) -> Result<Value, RuntimeError> {
+    let expr = &expressions[id];
+    match &expr.kind {
         ExprKind::Identifier(atom) => cx.get_symbol(*atom).ok_or_else(|| {
             RuntimeError::new(
                 "Undefined symbol",
                 format!("Could not find symbol {:?} in the current scope", &expr),
-                expr.source_span(),
+                expr.span,
             )
         }),
         ExprKind::Number(value) => Ok(Value::Number(*value)),
         ExprKind::Bool(value) => Ok(Value::Bool(*value)),
+        ExprKind::Array(value_exprs) => {
+            let mut values = Vec::with_capacity(value_exprs.len());
+            for value_expr in value_exprs.iter() {
+                values.push(eval(*value_expr, expressions, cx)?);
+            }
+            Ok(Value::Array(values))
+        }
         ExprKind::Binary { op, lhs, rhs } => {
-            let rhs = eval(expr.with_id(*rhs), cx)?;
+            let rhs = eval(*rhs, expressions, cx)?;
             if op == &BinaryOp::Assign {
-                let id_expr = expr.with_id(*lhs);
-                let identifier = match id_expr.expr() {
+                let id_expr = &expressions[*lhs];
+                let identifier = match &id_expr.kind {
                     ExprKind::Identifier(id) => *id,
                     _ => {
                         return Err(RuntimeError::new(
                             "Expected identifier",
                             format!("Expected identifier, found {}", op),
-                            expr.source_span(),
+                            id_expr.span,
                         ));
                     }
                 };
@@ -74,7 +86,7 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                     return Err(RuntimeError::new(
                         "Undefined symbol",
                         format!("Symbol {} not defined in the current scope", "asdf"),
-                        id_expr.source_span(),
+                        id_expr.span,
                     ));
                 }
 
@@ -82,42 +94,42 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                 return Ok(Value::Unit);
             };
 
-            let lhs = eval(expr.with_id(*lhs), cx)?;
+            let lhs = eval(*lhs, expressions, cx)?;
 
             match op {
-                BinaryOp::Add => lhs.try_add(&rhs, expr.source_span()),
-                BinaryOp::Sub => lhs.try_sub(&rhs, expr.source_span()),
-                BinaryOp::Mul => lhs.try_mul(&rhs, expr.source_span()),
-                BinaryOp::Div => lhs.try_div(&rhs, expr.source_span()),
+                BinaryOp::Add => lhs.try_add(&rhs, expr.span),
+                BinaryOp::Sub => lhs.try_sub(&rhs, expr.span),
+                BinaryOp::Mul => lhs.try_mul(&rhs, expr.span),
+                BinaryOp::Div => lhs.try_div(&rhs, expr.span),
                 BinaryOp::Eq => Ok(Value::Bool(lhs.eq(&rhs))),
                 BinaryOp::NotEq => Ok(Value::Bool(!lhs.eq(&rhs))),
-                BinaryOp::Less => lhs.lt(&rhs, expr.source_span()).map(Value::Bool),
-                BinaryOp::LessEq => lhs.leq(&rhs, expr.source_span()).map(Value::Bool),
-                BinaryOp::Greater => lhs.gt(&rhs, expr.source_span()).map(Value::Bool),
-                BinaryOp::GreaterEq => lhs.geq(&rhs, expr.source_span()).map(Value::Bool),
+                BinaryOp::Less => lhs.lt(&rhs, expr.span).map(Value::Bool),
+                BinaryOp::LessEq => lhs.leq(&rhs, expr.span).map(Value::Bool),
+                BinaryOp::Greater => lhs.gt(&rhs, expr.span).map(Value::Bool),
+                BinaryOp::GreaterEq => lhs.geq(&rhs, expr.span).map(Value::Bool),
                 BinaryOp::Assign => unreachable!(),
             }
         }
         ExprKind::Unary { op, operand } => {
-            let inner = eval(expr.with_id(*operand), cx)?;
+            let inner = eval(*operand, expressions, cx)?;
             match op {
-                UnaryOp::Neg => inner.try_neg(expr.source_span()),
-                UnaryOp::Not => inner.try_not(expr.source_span()),
+                UnaryOp::Neg => inner.try_neg(expr.span),
+                UnaryOp::Not => inner.try_not(expr.span),
             }
         }
         ExprKind::Block { children } => cx.with_scope(|cx| {
             for child in children.iter().take(children.len() - 1) {
-                eval(expr.with_id(*child), cx)?;
+                eval(*child, expressions, cx)?;
             }
-            eval(expr.with_id(*children.last().unwrap()), cx)
+            eval(*children.last().unwrap(), expressions, cx)
         }),
         ExprKind::Let { id, value } => {
-            let value = eval(expr.with_id(*value), cx)?;
+            let value = eval(*value, expressions, cx)?;
             cx.set_symbol(*id, value);
             Ok(Value::Unit)
         }
         ExprKind::FunctionCall { func, args } => {
-            let f = eval(expr.with_id(*func), cx)?;
+            let f = eval(*func, expressions, cx)?;
             let arg_exprs = args;
             let Value::Fn {
                 args,
@@ -128,7 +140,7 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                 return Err(RuntimeError::new(
                     "Unexpected",
                     format!("Expected function, found {}", f.get_type()),
-                    expr.source_span(),
+                    expr.span,
                 ));
             };
 
@@ -140,7 +152,7 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                         args.len(),
                         arg_exprs.len()
                     ),
-                    expr.source_span(),
+                    expr.span,
                 ));
             }
             cx.with_scope(|cx| {
@@ -149,11 +161,11 @@ pub fn eval(expr: ExprView, cx: &mut EvalContext) -> Result<Value, RuntimeError>
                 }
 
                 for (atom, value_expr) in args.iter().zip(arg_exprs) {
-                    let value = eval(expr.with_id(*value_expr), cx)?;
+                    let value = eval(*value_expr, expressions, cx)?;
                     cx.set_symbol(*atom, value);
                 }
 
-                eval(expr.with_id(def), cx)
+                eval(def, expressions, cx)
             })
         }
         ExprKind::FunctionDef {
