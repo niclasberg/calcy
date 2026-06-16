@@ -29,10 +29,6 @@ fn format_error(err: &ParseError) -> Report<'_, SourceSpan> {
 
 fn main() {
     let source = "
-        type A = #{
-            a: Num,
-            b: Bool,
-        };
         let a = 2 + -2; 
         let k = a + 1; 
         a = fn(a, b) 

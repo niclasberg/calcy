@@ -7,10 +7,9 @@ use std::{
 pub enum Type {
     /// Bottom type, represents a type that could never be constructed, and which is a subtype of any type
     Never,
-    /// Top type, all other types are a subtype of this
-    Any,
     Unit,
     Bool,
+    BoolLiteral(bool),
     Number,
     Array,
     Fn,
@@ -31,19 +30,19 @@ impl Type {
         }
     }
 
-    pub fn is_subtype_of(&self, other: &Self) -> bool {
+    pub fn conforms_to(&self, other: &Self) -> bool {
         match (self, other) {
-            (_, Type::Any) => true,
             (Type::Bool, Type::Bool) | (Type::Unit, Type::Unit) | (Type::Number, Type::Number) => {
                 true
             }
+            (Type::Bool, Type::BoolLiteral(_)) | (Type::BoolLiteral(_), Type::Bool) => true,
+            (Type::BoolLiteral(lhs), Type::BoolLiteral(rhs)) => *lhs == *rhs,
             _ => false,
         }
     }
 
     pub fn intersect(&self, other: &Self) -> Self {
         match (self, other) {
-            (Type::Any, other) | (other, Type::Any) => other.clone(),
             (Type::Bool, Type::Bool) => Self::Bool,
             (Type::Unit, Type::Unit) => Self::Unit,
             (Type::Number, Type::Number) => Self::Number,
@@ -71,12 +70,6 @@ impl Type {
             _ => Self::Never,
         }
     }
-
-    pub fn union(&self, other: &Self) -> Self {
-        match (self, other) {
-            _ => todo!(),
-        }
-    }
 }
 
 impl Display for Type {
@@ -84,8 +77,8 @@ impl Display for Type {
         match self {
             Type::Never => f.write_str("!"),
             Type::Unit => f.write_str("Unit"),
-            Type::Any => f.write_str("Any"),
             Type::Bool => f.write_str("Bool"),
+            Type::BoolLiteral(value) => Display::fmt(value, f),
             Type::Number => f.write_str("Number"),
             Type::Array => f.write_str("Array"),
             Type::Enum(alts) => {

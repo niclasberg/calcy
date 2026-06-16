@@ -115,6 +115,9 @@ pub enum Keyword {
     Else,
     Fn,
     Let,
+    Int,
+    Float,
+    Bool,
 }
 
 impl Keyword {
@@ -124,6 +127,9 @@ impl Keyword {
             Keyword::Else => "else",
             Keyword::Fn => "fn",
             Keyword::Let => "let",
+            Keyword::Int => "Int",
+            Keyword::Float => "Float",
+            Keyword::Bool => "Bool",
         }
     }
 }
@@ -240,6 +246,9 @@ fn identifier_or_keyword<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
             "let" => TokenKind::Keyword(Keyword::Let),
             "true" => TokenKind::Literal(Literal::Bool(true)),
             "false" => TokenKind::Literal(Literal::Bool(false)),
+            "Int" => TokenKind::Keyword(Keyword::Int),
+            "Float" => TokenKind::Keyword(Keyword::Float),
+            "Bool" => TokenKind::Keyword(Keyword::Bool),
             _ => TokenKind::Identifier(id),
         })
         .parse_next(i)
