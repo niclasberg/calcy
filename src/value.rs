@@ -24,7 +24,10 @@ impl Value {
             Value::Unit => Type::Unit,
             Value::Bool(_) => Type::Bool,
             Value::Number(_) => Type::Number,
-            Value::Fn { .. } => Type::Fn,
+            Value::Fn { .. } => Type::Fn {
+                args: Vec::new(),
+                ret: Box::new(Type::Unit),
+            },
             Value::Array(..) => Type::Array,
         }
     }

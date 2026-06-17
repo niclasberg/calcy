@@ -12,7 +12,10 @@ pub enum Type {
     BoolLiteral(bool),
     Number,
     Array,
-    Fn,
+    Fn {
+        args: Vec<Type>,
+        ret: Box<Type>,
+    },
     // The set must have at least 2 members
     Enum(BTreeSet<Type>),
     Struct(BTreeMap<String, Type>),
@@ -90,7 +93,13 @@ impl Display for Type {
                 alts.last().map(|alt| alt.fmt(f)).unwrap_or(Ok(()))
             }
             Type::Struct(_) => todo!(),
-            Type::Fn => f.write_str("fn"),
+            Type::Fn { args, ret } => {
+                write!(f, "fn (")?;
+                for arg in args.iter() {
+                    write!(f, "{}, ", arg)?;
+                }
+                write!(f, ") -> {}", &ret)
+            }
         }
     }
 }
