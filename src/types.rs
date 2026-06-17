@@ -30,13 +30,14 @@ impl Type {
         }
     }
 
-    pub fn conforms_to(&self, other: &Self) -> bool {
+    pub fn is_compatible_with(&self, other: &Self) -> bool {
         match (self, other) {
             (Type::Bool, Type::Bool) | (Type::Unit, Type::Unit) | (Type::Number, Type::Number) => {
                 true
             }
             (Type::Bool, Type::BoolLiteral(_)) | (Type::BoolLiteral(_), Type::Bool) => true,
             (Type::BoolLiteral(lhs), Type::BoolLiteral(rhs)) => *lhs == *rhs,
+            (_, Type::Never) => true,
             _ => false,
         }
     }
