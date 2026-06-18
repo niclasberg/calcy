@@ -5,8 +5,8 @@ use std::{
 
 use crate::{
     atom::Atom,
-    expr::{Expr, ExprKind},
-    types::Type::BoolLiteral,
+    expr::{Expr, ExprId, ExprKind, Expressions, TypeAnnotation},
+    lexer::SourceSpan,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
@@ -21,7 +21,7 @@ pub enum Type {
     BoolLiteral(bool),
     Number,
     Array,
-    TypeVar(TypeVarId),
+    Var(TypeVarId),
     Fn {
         args: Vec<Type>,
         ret: Box<Type>,
@@ -86,6 +86,21 @@ impl Type {
     }
 }
 
+impl From<&TypeAnnotation> for Type {
+    fn from(value: &TypeAnnotation) -> Self {
+        match value {
+            TypeAnnotation::Never => Type::Never,
+            TypeAnnotation::Unit => Type::Unit,
+            TypeAnnotation::Bool => Type::Bool,
+            TypeAnnotation::Float => Type::Number,
+            TypeAnnotation::Fn(args, ret) => Type::Fn {
+                args: args.iter().map(Self::from).collect(),
+                ret: Box::new(ret.as_ref().into()),
+            },
+        }
+    }
+}
+
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -110,12 +125,23 @@ impl Display for Type {
                 }
                 write!(f, ") -> {}", &ret)
             }
-            Type::TypeVar(_) => todo!(),
+            Type::Var(_) => todo!(),
         }
     }
 }
 
-pub enum TypeError {
+pub struct TypeError {
+    pub kind: TypeErrorKind,
+    pub span: SourceSpan,
+}
+
+impl TypeError {
+    pub fn new(kind: TypeErrorKind, span: SourceSpan) -> Self {
+        Self { kind, span }
+    }
+}
+
+pub enum TypeErrorKind {
     UndefinedVariable(Atom),
 }
 
@@ -125,27 +151,41 @@ pub enum Constraint {
 }
 
 pub struct TypeContext {
-    types: Vec<Type>,
+    next_var_id: usize,
     constraints: Vec<Constraint>,
     symbols: HashMap<Atom, Type>,
 }
 
-pub fn infer(cx: &mut TypeContext, expr: &Expr) -> Result<Type, TypeError> {
+pub fn infer(
+    cx: &mut TypeContext,
+    expressions: &Expressions,
+    expr_id: ExprId,
+) -> Result<Type, TypeError> {
+    let expr = &expressions[expr_id];
     match &expr.kind {
         ExprKind::Number(_) => Ok(Type::Number),
-        ExprKind::Bool(value) => Ok(BoolLiteral(*value)),
-        ExprKind::Identifier(atom) => cx
-            .symbols
-            .get(atom)
-            .cloned()
-            .ok_or(TypeError::UndefinedVariable(*atom)),
+        ExprKind::Bool(value) => Ok(Type::BoolLiteral(*value)),
+        ExprKind::Identifier(atom) => cx.symbols.get(atom).cloned().ok_or(TypeError::new(
+            TypeErrorKind::UndefinedVariable(*atom),
+            expr.span,
+        )),
         ExprKind::Array(expr_ids) => todo!(),
         ExprKind::FunctionCall { func, args } => todo!(),
         ExprKind::Let {
             id,
             value,
             type_annotation,
-        } => todo!(),
+        } => {
+            let t = if let Some(expected_type) = type_annotation {
+                let t = expected_type.into();
+                check(cx, expressions, *value, &t)?;
+                t
+            } else {
+                infer(cx, expressions, *value)?
+            };
+            cx.symbols.insert(*id, t);
+            Ok(Type::Unit)
+        }
         ExprKind::FunctionDef {
             args,
             captures,
@@ -155,4 +195,13 @@ pub fn infer(cx: &mut TypeContext, expr: &Expr) -> Result<Type, TypeError> {
         ExprKind::Binary { lhs, op, rhs } => todo!(),
         ExprKind::Block { children } => todo!(),
     }
+}
+
+pub fn check(
+    cx: &mut TypeContext,
+    expressions: &Expressions,
+    expr_id: ExprId,
+    expected: &Type,
+) -> Result<(), TypeError> {
+    Ok(())
 }
