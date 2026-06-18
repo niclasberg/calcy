@@ -31,11 +31,12 @@ fn main() {
     let source = "
         let a = 2 + -2; 
         let k = a + 1; 
-        a = fn(a, b) 
+        a = fn(a, b) (
             fn(k) (
                 let d = a + b + k; 
                 [[a, a], b, k, d<a]
-            ); 
+            )
+        ); 
         a(15, 4)(40)
     ";
     let tokens = tokens(source).unwrap();
