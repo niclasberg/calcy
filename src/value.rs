@@ -3,7 +3,28 @@ use std::{
     fmt::{Display, Write},
 };
 
-use crate::{atom::Atom, eval::RuntimeError, expr::ExprId, lexer::SourceSpan, types::Type};
+use crate::{atom::Atom, eval::RuntimeError, expr::ExprId, lexer::SourceSpan};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueType {
+    Unit,
+    Bool,
+    Number,
+    Array,
+    Fn,
+}
+
+impl Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unit => f.write_str("Unit"),
+            Self::Bool => f.write_str("Bool"),
+            Self::Number => f.write_str("Number"),
+            Self::Array => f.write_str("Array"),
+            Self::Fn => f.write_str("fn"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -19,13 +40,13 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn get_type(&self) -> Type {
+    pub fn get_type(&self) -> ValueType {
         match self {
-            Value::Unit => Type::Unit,
-            Value::Bool(_) => Type::Bool,
-            Value::Number(_) => Type::Number,
-            Value::Fn { .. } => Type::Fn,
-            Value::Array(..) => Type::Array,
+            Value::Unit => ValueType::Unit,
+            Value::Bool(_) => ValueType::Bool,
+            Value::Number(_) => ValueType::Number,
+            Value::Fn { .. } => ValueType::Fn,
+            Value::Array(..) => ValueType::Array,
         }
     }
 

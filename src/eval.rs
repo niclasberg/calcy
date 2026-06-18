@@ -5,7 +5,7 @@ use crate::{
     expr::{BinaryOp, ExprId, ExprKind, Expressions, UnaryOp},
     lexer::SourceSpan,
     types::Type,
-    value::Value,
+    value::{Value, ValueType},
 };
 
 #[derive(Debug)]
@@ -24,7 +24,7 @@ impl RuntimeError {
         }
     }
 
-    pub fn type_error(op: &str, type1: Type, type2: Type, span: SourceSpan) -> Self {
+    pub fn type_error(op: &str, type1: ValueType, type2: ValueType, span: SourceSpan) -> Self {
         Self::new(
             "Type error",
             format!(
@@ -123,7 +123,7 @@ pub fn eval(
             }
             eval(*children.last().unwrap(), expressions, cx)
         }),
-        ExprKind::Let { id, value } => {
+        ExprKind::Let { id, value, .. } => {
             let value = eval(*value, expressions, cx)?;
             cx.set_symbol(*id, value);
             Ok(Value::Unit)

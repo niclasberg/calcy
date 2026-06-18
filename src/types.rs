@@ -1,7 +1,16 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt::Display,
 };
+
+use crate::{
+    atom::Atom,
+    expr::{Expr, ExprKind},
+    types::Type::BoolLiteral,
+};
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, PartialOrd, Ord)]
+pub struct TypeVarId(usize);
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub enum Type {
@@ -12,7 +21,8 @@ pub enum Type {
     BoolLiteral(bool),
     Number,
     Array,
-    Fn,
+    Fn(Vec<Type>, Box<Type>),
+    TypeVar(TypeVarId),
     // The set must have at least 2 members
     Enum(BTreeSet<Type>),
     Struct(BTreeMap<String, Type>),
@@ -90,7 +100,50 @@ impl Display for Type {
                 alts.last().map(|alt| alt.fmt(f)).unwrap_or(Ok(()))
             }
             Type::Struct(_) => todo!(),
-            Type::Fn => f.write_str("fn"),
+            Type::Fn(..) => f.write_str("fn"),
+            Type::TypeVar(_) => todo!(),
         }
+    }
+}
+
+pub enum TypeError {
+    UndefinedVariable(Atom),
+}
+
+pub enum Constraint {
+    Equal { lhs: Type, rhs: Type },
+    Join { lhs: Type, rhs: Type, result: Type },
+}
+
+pub struct TypeContext {
+    types: Vec<Type>,
+    constraints: Vec<Constraint>,
+    symbols: HashMap<Atom, Type>,
+}
+
+pub fn infer(cx: &mut TypeContext, expr: &Expr) -> Result<Type, TypeError> {
+    match &expr.kind {
+        ExprKind::Number(_) => Ok(Type::Number),
+        ExprKind::Bool(value) => Ok(BoolLiteral(*value)),
+        ExprKind::Identifier(atom) => cx
+            .symbols
+            .get(atom)
+            .cloned()
+            .ok_or(TypeError::UndefinedVariable(*atom)),
+        ExprKind::Array(expr_ids) => todo!(),
+        ExprKind::FunctionCall { func, args } => todo!(),
+        ExprKind::Let {
+            id,
+            value,
+            type_annotation,
+        } => todo!(),
+        ExprKind::FunctionDef {
+            args,
+            captures,
+            body,
+        } => todo!(),
+        ExprKind::Unary { op, operand } => todo!(),
+        ExprKind::Binary { lhs, op, rhs } => todo!(),
+        ExprKind::Block { children } => todo!(),
     }
 }

@@ -77,7 +77,14 @@ impl Expressions {
         let value_expr = self.parse_expr(i, 0)?;
         let span = let_token.span.join(&value_expr.span);
         let value = self.push_expr(value_expr);
-        Ok(Expr::new(ExprKind::Let { id, value }, span))
+        Ok(Expr::new(
+            ExprKind::Let {
+                id,
+                value,
+                type_annotation: None,
+            },
+            span,
+        ))
     }
 
     fn try_parse_identifier(&mut self, i: &mut TokenStream) -> Option<Atom> {
@@ -259,7 +266,7 @@ impl Expressions {
                         f(*atom)
                     }
                 }
-                ExprKind::Let { id, value } => {
+                ExprKind::Let { id, value, .. } => {
                     locals.insert(id);
                     rem.push_back(*value);
                 }
@@ -458,6 +465,7 @@ pub enum ExprKind {
     Let {
         id: Atom,
         value: ExprId,
+        type_annotation: Option<TypeAnnotation>,
     },
     FunctionDef {
         args: Vec<Atom>,
@@ -476,6 +484,15 @@ pub enum ExprKind {
     Block {
         children: Vec<ExprId>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeAnnotation {
+    Never,
+    Unit,
+    Bool,
+    Float,
+    Fn(Vec<TypeAnnotation>, Box<TypeAnnotation>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -585,7 +602,7 @@ impl<'a> Debug for ExprView<'a> {
                 .field("func", &self.with_id(*func))
                 .finish(),
             ExprKind::FunctionDef { .. } => todo!(),
-            ExprKind::Let { id, value } => todo!(),
+            ExprKind::Let { .. } => todo!(),
             ExprKind::Array(..) => todo!(),
         }
     }
