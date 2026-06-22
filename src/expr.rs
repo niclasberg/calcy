@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     atom::{Atom, Atoms},
+    expr::ExprKind::IfThenElse,
     lexer::{Keyword, Literal, Oper, SourceSpan, Token, TokenKind},
 };
 
@@ -70,9 +71,8 @@ impl Expressions {
 
     fn parse_let(&mut self, i: &mut TokenStream) -> Result<Expr, ParseError> {
         let let_token = i.expect_token(TokenKind::Keyword(Keyword::Let))?;
-        let id = self
-            .try_parse_identifier(i)
-            .ok_or(ParseError::unexpected_token(i.peek(), "identifier"))?;
+        let id = self.parse_identifier(i)?;
+        let type_annotation = self.parse_type_annotation(i)?;
         i.expect_token(TokenKind::Op(Oper::Assign))?;
         let value_expr = self.parse_expr(i, 0)?;
         let span = let_token.span.join(&value_expr.span);
@@ -81,17 +81,41 @@ impl Expressions {
             ExprKind::Let {
                 id,
                 value,
-                type_annotation: None,
+                type_annotation,
             },
             span,
         ))
     }
 
-    fn try_parse_identifier(&mut self, i: &mut TokenStream) -> Option<Atom> {
+    fn parse_identifier(&mut self, i: &mut TokenStream) -> Result<Atom, ParseError> {
         i.match_map(|t| match t.kind {
             TokenKind::Identifier(id) => Some(self.atoms.get_or_intern(id)),
             _ => None,
         })
+        .ok_or(ParseError::unexpected_token(i.peek(), "identifier"))
+    }
+
+    fn parse_type_annotation(
+        &mut self,
+        i: &mut TokenStream,
+    ) -> Result<Option<TypeAnnotation>, ParseError> {
+        if i.match_token(TokenKind::Op(Oper::Colon)).is_some() {
+            let t = i.next();
+            let TokenKind::Keyword(keyword) = t.kind else {
+                return Err(ParseError::unexpected_token(t, "type"));
+            };
+            match keyword {
+                Keyword::Bool => Ok(Some(TypeAnnotation::Bool)),
+                Keyword::Float => Ok(Some(TypeAnnotation::Float)),
+                Keyword::Fn => Ok(Some(TypeAnnotation::Fn(
+                    Vec::new(),
+                    Box::new(TypeAnnotation::Unit),
+                ))),
+                _ => Err(ParseError::unexpected_token(t, "type")),
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_expr(
@@ -116,20 +140,29 @@ impl Expressions {
                     i.expect_token(TokenKind::Op(Oper::LParen))?;
 
                     let mut args = Vec::new();
-                    while let Some(atom) = self.try_parse_identifier(i) {
-                        args.push(atom);
-                        if i.match_token(TokenKind::Op(Oper::Comma)).is_none() {
-                            break;
+                    if i.peek().kind != TokenKind::Op(Oper::RParen) {
+                        loop {
+                            let id = self.parse_identifier(i)?;
+                            let type_annotation = self.parse_type_annotation(i)?;
+                            args.push(FnArg {
+                                id,
+                                type_annotation,
+                            });
+                            if i.match_token(TokenKind::Op(Oper::Comma)).is_none() {
+                                break;
+                            }
                         }
                     }
+
                     i.expect_token(TokenKind::Op(Oper::RParen))?;
+                    let ret_type = self.parse_type_annotation(i)?;
 
                     let body_expr = self.parse_expr(i, 0)?;
                     let span = span.join(&body_expr.span);
                     let body = self.push_expr(body_expr);
                     let mut captures = HashSet::new();
                     self.find_captures(body, &mut |atom| {
-                        if !args.contains(&atom) {
+                        if !args.iter().any(|a| a.id == atom) {
                             captures.insert(atom);
                         }
                     });
@@ -138,6 +171,7 @@ impl Expressions {
                             args,
                             captures,
                             body,
+                            ret_type,
                         },
                         span,
                     )
@@ -286,6 +320,11 @@ impl Expressions {
                     rem.push_back(*rhs);
                 }
                 ExprKind::Block { children } => rem.extend(children.iter()),
+                IfThenElse { cond, lhs, rhs } => {
+                    rem.push_back(*cond);
+                    rem.push_back(*lhs);
+                    rem.push_back(*rhs);
+                }
             }
         }
         self.id_buffer.set(rem);
@@ -303,6 +342,10 @@ impl Expressions {
 
     pub fn view(&self, id: ExprId) -> ExprView<'_> {
         ExprView { id, exprs: &self }
+    }
+
+    pub fn get_atom(&self, atom: Atom) -> &str {
+        self.atoms.resolve(&atom)
     }
 }
 
@@ -467,10 +510,16 @@ pub enum ExprKind {
         value: ExprId,
         type_annotation: Option<TypeAnnotation>,
     },
+    IfThenElse {
+        cond: ExprId,
+        lhs: ExprId,
+        rhs: ExprId,
+    },
     FunctionDef {
-        args: Vec<Atom>,
+        args: Vec<FnArg>,
         captures: HashSet<Atom>,
         body: ExprId,
+        ret_type: Option<TypeAnnotation>,
     },
     Unary {
         op: UnaryOp,
@@ -493,6 +542,12 @@ pub enum TypeAnnotation {
     Bool,
     Float,
     Fn(Vec<TypeAnnotation>, Box<TypeAnnotation>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnArg {
+    pub id: Atom,
+    pub type_annotation: Option<TypeAnnotation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -572,10 +627,6 @@ impl<'a> ExprView<'a> {
     pub fn expr(&self) -> &ExprKind {
         &self.exprs.get_expr(self.id).unwrap().kind
     }
-
-    pub fn source_span(&self) -> SourceSpan {
-        self.exprs.get_expr(self.id).unwrap().span
-    }
 }
 
 impl<'a> Debug for ExprView<'a> {
@@ -601,6 +652,7 @@ impl<'a> Debug for ExprView<'a> {
                 .debug_struct("FunctionCall")
                 .field("func", &self.with_id(*func))
                 .finish(),
+            ExprKind::IfThenElse { .. } => todo!(),
             ExprKind::FunctionDef { .. } => todo!(),
             ExprKind::Let { .. } => todo!(),
             ExprKind::Array(..) => todo!(),
@@ -620,13 +672,13 @@ impl ParseError {
     }
 
     fn unexpected_token(found: &Token, expected: impl ToString) -> Self {
-        Self {
-            kind: ParseErrorKind::UnexpectedToken {
+        Self::new(
+            ParseErrorKind::UnexpectedToken {
                 found: found.kind.to_string(),
                 expected: expected.to_string(),
             },
-            span: found.span,
-        }
+            found.span,
+        )
     }
 }
 
@@ -670,6 +722,7 @@ mod tests {
                 fmt_ast(*rhs, expressions, f)?;
                 f.write_char(')')
             }
+            ExprKind::IfThenElse { .. } => todo!(),
             ExprKind::Block { .. } => todo!(),
             ExprKind::Let { .. } => todo!(),
             ExprKind::Array(..) => todo!(),

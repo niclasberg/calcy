@@ -172,6 +172,7 @@ pub fn eval(
             captures,
             args,
             body,
+            ..
         } => {
             let mut captured_values = HashMap::new();
             for &capture in captures.iter() {
@@ -180,10 +181,26 @@ pub fn eval(
             }
 
             Ok(Value::Fn {
-                args: args.clone(),
+                args: args.iter().map(|a| a.id).collect(),
                 def: *body,
                 captures: captured_values,
             })
+        }
+        ExprKind::IfThenElse { cond, lhs, rhs } => {
+            let cond_value = eval(*cond, expressions, cx)?;
+            let Value::Bool(cond_value) = cond_value else {
+                return Err(RuntimeError::type_error(
+                    "if",
+                    cond_value.get_type(),
+                    ValueType::Bool,
+                    expressions[*cond].span,
+                ));
+            };
+            if cond_value {
+                eval(*lhs, expressions, cx)
+            } else {
+                eval(*rhs, expressions, cx)
+            }
         }
     }
 }

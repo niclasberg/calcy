@@ -2,8 +2,9 @@ use ariadne::{Label, Report, Source};
 
 use crate::{
     eval::EvalContext,
-    expr::{ExprView, Expressions, ParseError},
+    expr::{Expressions, ParseError},
     lexer::{SourceSpan, tokens},
+    types::{TypeContext, TypeError, TypeErrorKind, infer},
 };
 
 mod atom;
@@ -13,7 +14,7 @@ mod lexer;
 mod types;
 mod value;
 
-fn format_error(err: &ParseError) -> Report<'_, SourceSpan> {
+fn format_parse_error(err: &ParseError) -> Report<'_, SourceSpan> {
     let mut builder = Report::build(ariadne::ReportKind::Error, err.span);
     builder = match &err.kind {
         expr::ParseErrorKind::UnexpectedToken { found, expected } => {
@@ -27,12 +28,44 @@ fn format_error(err: &ParseError) -> Report<'_, SourceSpan> {
     builder.finish()
 }
 
+fn format_type_error<'s>(err: &TypeError, expressions: &'s Expressions) -> Report<'s, SourceSpan> {
+    let mut builder = Report::build(ariadne::ReportKind::Error, err.span);
+    builder = match &err.kind {
+        TypeErrorKind::UndefinedVariable(atom) => builder
+            .with_message("Undefined variable")
+            .with_label(Label::new(err.span).with_message(format!(
+                "Could not find the variable `{}` in the current scope",
+                expressions.get_atom(*atom)
+            ))),
+        TypeErrorKind::NeedTypeAnnotation => {
+            builder.with_message("Type annotation needed").with_label(
+                Label::new(err.span)
+                    .with_message(format!("Could not infer type, need type annotation")),
+            )
+        }
+        TypeErrorKind::ExpectedIdentifier => todo!(),
+        TypeErrorKind::UnexpectedType { expected, actual } => builder
+            .with_message("Type error")
+            .with_label(Label::new(err.span).with_message(format!(
+                "Exprected type `{}` found `{}`",
+                &expected, &actual
+            ))),
+        TypeErrorKind::ExpectedFunction { found } => {
+            builder.with_message("Invalid function call").with_label(
+                Label::new(err.span)
+                    .with_message(format!("Expected a function, found `{}`", &found)),
+            )
+        }
+    };
+    builder.finish()
+}
+
 fn main() {
     let source = "
         let a = 2 + -2; 
         let k = a + 1; 
-        a = fn(a, b) (
-            fn(k) (
+        a = fn(a: Float, b: Float): Float (
+            fn(k: Float): Float (
                 let d = a + b + k; 
                 [[a, a], b, k, d<a]
             )
@@ -44,7 +77,17 @@ fn main() {
     let expr = match exprs.parse(&tokens) {
         Ok(expr) => expr,
         Err(err) => {
-            let report = format_error(&err);
+            let report = format_parse_error(&err);
+            report.print(Source::from(source)).unwrap();
+            return;
+        }
+    };
+
+    let mut type_cx = TypeContext::new();
+    let expr_type = match infer(&mut type_cx, &exprs, expr) {
+        Ok(expr_type) => expr_type,
+        Err(type_error) => {
+            let report = format_type_error(&type_error, &exprs);
             report.print(Source::from(source)).unwrap();
             return;
         }

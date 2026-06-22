@@ -77,6 +77,7 @@ pub enum Oper {
     RBracket,
     LBrace,
     RBrace,
+    Colon,
     SemiColon,
     Comma,
 }
@@ -104,6 +105,7 @@ impl Oper {
             Oper::LBrace => "{",
             Oper::RBrace => "}",
             Oper::SemiColon => ";",
+            Oper::Colon => ":",
             Oper::Comma => ",",
         }
     }
@@ -224,6 +226,7 @@ fn token<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
             ']' => empty.value(Oper::RBracket),
             '{' => empty.value(Oper::LBrace),
             '}' => empty.value(Oper::RBrace),
+            ':' => empty.value(Oper::Colon),
             ';' => empty.value(Oper::SemiColon),
             ',' => empty.value(Oper::Comma),
             _ => fail
