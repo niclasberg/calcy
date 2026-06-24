@@ -2,9 +2,8 @@ use std::{collections::HashMap, error::Error, fmt::Display};
 
 use crate::{
     atom::Atom,
-    expr::{BinaryOp, ExprId, ExprKind, Expressions, UnaryOp},
+    expr::{ArrayElem, BinaryOp, ExprId, ExprKind, Expressions, UnaryOp},
     lexer::SourceSpan,
-    types::Type,
     value::{Value, ValueType},
 };
 
@@ -58,12 +57,24 @@ pub fn eval(
                 expr.span,
             )
         }),
-        ExprKind::Number(value) => Ok(Value::Number(*value)),
+        ExprKind::Number(value) => Ok(Value::Float(*value)),
         ExprKind::Bool(value) => Ok(Value::Bool(*value)),
         ExprKind::Array(value_exprs) => {
             let mut values = Vec::with_capacity(value_exprs.len());
-            for value_expr in value_exprs.iter() {
-                values.push(eval(*value_expr, expressions, cx)?);
+            for e in value_exprs.iter() {
+                let elem = eval(e.expr_id, expressions, cx)?;
+                if e.flatten {
+                    let Value::Array(vs) = elem else {
+                        return Err(RuntimeError::new(
+                            "Type error",
+                            format!("Expected array for .. operator, found {}", elem.get_type()),
+                            expressions[e.expr_id].span,
+                        ));
+                    };
+                    values.extend(vs);
+                } else {
+                    values.push(elem);
+                }
             }
             Ok(Value::Array(values))
         }

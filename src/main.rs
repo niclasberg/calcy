@@ -2,8 +2,9 @@ use ariadne::{Label, Report, Source};
 
 use crate::{
     eval::EvalContext,
-    expr::{Expressions, ParseError},
+    expr::Expressions,
     lexer::{SourceSpan, tokens},
+    parse_expr::{ParseError, ParseErrorKind, parse},
     types::{TypeContext, TypeError, TypeErrorKind, infer},
 };
 
@@ -11,19 +12,20 @@ mod atom;
 mod eval;
 mod expr;
 mod lexer;
+mod parse_expr;
 mod types;
 mod value;
 
 fn format_parse_error(err: &ParseError) -> Report<'_, SourceSpan> {
     let mut builder = Report::build(ariadne::ReportKind::Error, err.span);
     builder = match &err.kind {
-        expr::ParseErrorKind::UnexpectedToken { found, expected } => {
+        ParseErrorKind::UnexpectedToken { found, expected } => {
             builder.with_message("Unexpected token").with_label(
                 Label::new(err.span)
                     .with_message(format!("Found `{}`, expected `{}`", &found, &expected)),
             )
         }
-        expr::ParseErrorKind::UnexpectedEOF => builder.with_message("Unexpected end of file"),
+        ParseErrorKind::UnexpectedEOF => builder.with_message("Unexpected end of file"),
     };
     builder.finish()
 }
@@ -43,6 +45,12 @@ fn format_type_error<'s>(err: &TypeError, expressions: &'s Expressions) -> Repor
                     .with_message(format!("Could not infer type, need type annotation")),
             )
         }
+        TypeErrorKind::ArgumentCountMismatch { expected, found } => builder
+            .with_message("Invalid function call")
+            .with_label(Label::new(err.span).with_message(format!(
+                "Function expected `{}` arguments, found `{}`",
+                expected, found
+            ))),
         TypeErrorKind::ExpectedIdentifier => todo!(),
         TypeErrorKind::UnexpectedType { expected, actual } => builder
             .with_message("Type error")
@@ -56,6 +64,9 @@ fn format_type_error<'s>(err: &TypeError, expressions: &'s Expressions) -> Repor
                     .with_message(format!("Expected a function, found `{}`", &found)),
             )
         }
+        TypeErrorKind::ExpectedArray { found } => builder.with_message("Type error").with_label(
+            Label::new(err.span).with_message(format!("Expected an array, found `{}`", &found)),
+        ),
     };
     builder.finish()
 }
@@ -64,17 +75,20 @@ fn main() {
     let source = "
         let a = 2 + -2; 
         let k = a + 1; 
-        a = fn(a: Float, b: Float): Float (
-            fn(k: Float): Float (
+        let dd = true;
+        dd = false;
+        let f = fn(a: Float, b: Float): (Float) => [Bool | Float] (
+            fn(k): [Float] (
                 let d = a + b + k; 
-                [[a, a], b, k, d<a]
+                let arr = [10, true];
+                [b, k, d<a, ..arr, false]
             )
         ); 
-        a(15, 4)(40)
+        if a < k then f(15, 4)(40) else [true]
     ";
     let tokens = tokens(source).unwrap();
     let mut exprs = Expressions::new();
-    let expr = match exprs.parse(&tokens) {
+    let expr = match parse(&mut exprs, &tokens) {
         Ok(expr) => expr,
         Err(err) => {
             let report = format_parse_error(&err);
@@ -92,6 +106,7 @@ fn main() {
             return;
         }
     };
+    println!("Result type: {}", expr_type);
 
     let mut cx = EvalContext::new();
     let value = match eval::eval(expr, &exprs, &mut cx) {
@@ -106,5 +121,5 @@ fn main() {
             return;
         }
     };
-    println!("{:?} -> {:?}", exprs.view(expr), value);
+    println!("{:?} -> {}", exprs.view(expr), value);
 }

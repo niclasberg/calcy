@@ -78,8 +78,11 @@ pub enum Oper {
     LBrace,
     RBrace,
     Colon,
-    SemiColon,
-    Comma,
+    SemiColon, // ;
+    Comma,     // ,
+    Arrow,     // =>
+    BinaryOr,  // |
+    Spread,    // ..
 }
 
 impl Oper {
@@ -107,6 +110,9 @@ impl Oper {
             Oper::SemiColon => ";",
             Oper::Colon => ":",
             Oper::Comma => ",",
+            Oper::Arrow => "=>",
+            Oper::BinaryOr => "|",
+            Oper::Spread => "..",
         }
     }
 }
@@ -114,6 +120,7 @@ impl Oper {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     If,
+    Then,
     Else,
     Fn,
     Let,
@@ -127,6 +134,7 @@ impl Keyword {
         match self {
             Keyword::If => "if",
             Keyword::Else => "else",
+            Keyword::Then => "then",
             Keyword::Fn => "fn",
             Keyword::Let => "let",
             Keyword::Int => "Int",
@@ -205,7 +213,10 @@ fn token<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
             '-' => empty.value(Oper::Sub),
             '*' => empty.value(Oper::Mul),
             '/' => empty.value(Oper::Div),
-            '.' => empty.value(Oper::Dot),
+            '.' => alt((
+                '.'.value(Oper::Spread),
+                empty.value(Oper::Dot)
+            )),
             '<' => alt((
                 '='.value(Oper::LessEq),
                 empty.value(Oper::Less)
@@ -220,6 +231,7 @@ fn token<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
             )),
             '=' => alt((
                 '='.value(Oper::Eq),
+                '>'.value(Oper::Arrow),
                 empty.value(Oper::Assign)
             )),
             '[' => empty.value(Oper::LBracket),
@@ -229,6 +241,7 @@ fn token<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
             ':' => empty.value(Oper::Colon),
             ';' => empty.value(Oper::SemiColon),
             ',' => empty.value(Oper::Comma),
+            '|' => empty.value(Oper::BinaryOr),
             _ => fail
         }
         .map(TokenKind::Op),
@@ -245,6 +258,7 @@ fn identifier_or_keyword<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
         .map(|id| match id {
             "if" => TokenKind::Keyword(Keyword::If),
             "else" => TokenKind::Keyword(Keyword::Else),
+            "then" => TokenKind::Keyword(Keyword::Then),
             "fn" => TokenKind::Keyword(Keyword::Fn),
             "let" => TokenKind::Keyword(Keyword::Let),
             "true" => TokenKind::Literal(Literal::Bool(true)),

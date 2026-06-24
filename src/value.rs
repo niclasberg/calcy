@@ -9,7 +9,7 @@ use crate::{atom::Atom, eval::RuntimeError, expr::ExprId, lexer::SourceSpan};
 pub enum ValueType {
     Unit,
     Bool,
-    Number,
+    Float,
     Array,
     Fn,
 }
@@ -19,7 +19,7 @@ impl Display for ValueType {
         match self {
             Self::Unit => f.write_str("Unit"),
             Self::Bool => f.write_str("Bool"),
-            Self::Number => f.write_str("Number"),
+            Self::Float => f.write_str("Number"),
             Self::Array => f.write_str("Array"),
             Self::Fn => f.write_str("fn"),
         }
@@ -30,7 +30,7 @@ impl Display for ValueType {
 pub enum Value {
     Unit,
     Bool(bool),
-    Number(f64),
+    Float(f64),
     Fn {
         args: Vec<Atom>,
         captures: HashMap<Atom, Value>,
@@ -44,7 +44,7 @@ impl Value {
         match self {
             Value::Unit => ValueType::Unit,
             Value::Bool(_) => ValueType::Bool,
-            Value::Number(_) => ValueType::Number,
+            Value::Float(_) => ValueType::Float,
             Value::Fn { .. } => ValueType::Fn,
             Value::Array(..) => ValueType::Array,
         }
@@ -54,7 +54,7 @@ impl Value {
         match (self, other) {
             (Value::Unit, Value::Unit) => Ok(false),
             (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs < rhs),
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(lhs < rhs),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs < rhs),
             _ => Err(RuntimeError::type_error(
                 "<",
                 self.get_type(),
@@ -68,7 +68,7 @@ impl Value {
         match (self, other) {
             (Value::Unit, Value::Unit) => Ok(true),
             (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs <= rhs),
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(lhs <= rhs),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs <= rhs),
             _ => Err(RuntimeError::type_error(
                 "<=",
                 self.get_type(),
@@ -82,7 +82,7 @@ impl Value {
         match (self, other) {
             (Value::Unit, Value::Unit) => Ok(false),
             (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs > rhs),
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(lhs > rhs),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs > rhs),
             _ => Err(RuntimeError::type_error(
                 ">",
                 self.get_type(),
@@ -96,7 +96,7 @@ impl Value {
         match (self, other) {
             (Value::Unit, Value::Unit) => Ok(true),
             (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs >= rhs),
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(lhs >= rhs),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs >= rhs),
             _ => Err(RuntimeError::type_error(
                 ">=",
                 self.get_type(),
@@ -108,7 +108,7 @@ impl Value {
 
     pub fn try_add(&self, other: &Self, span: SourceSpan) -> Result<Self, RuntimeError> {
         match (self, other) {
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs + rhs)),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
             _ => Err(RuntimeError::type_error(
                 "+",
                 self.get_type(),
@@ -120,7 +120,7 @@ impl Value {
 
     pub fn try_sub(&self, other: &Self, span: SourceSpan) -> Result<Self, RuntimeError> {
         match (self, other) {
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs - rhs)),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs - rhs)),
             _ => Err(RuntimeError::type_error(
                 "-",
                 self.get_type(),
@@ -132,7 +132,7 @@ impl Value {
 
     pub fn try_mul(&self, other: &Self, span: SourceSpan) -> Result<Self, RuntimeError> {
         match (self, other) {
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs * rhs)),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs * rhs)),
             _ => Err(RuntimeError::type_error(
                 "*",
                 self.get_type(),
@@ -144,7 +144,7 @@ impl Value {
 
     pub fn try_div(&self, other: &Self, span: SourceSpan) -> Result<Self, RuntimeError> {
         match (self, other) {
-            (Value::Number(lhs), Value::Number(rhs)) => Ok(Value::Number(lhs / rhs)),
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs / rhs)),
             _ => Err(RuntimeError::type_error(
                 "/",
                 self.get_type(),
@@ -156,7 +156,7 @@ impl Value {
 
     pub fn try_neg(&self, span: SourceSpan) -> Result<Self, RuntimeError> {
         match self {
-            Value::Number(value) => Ok(Value::Number(-value)),
+            Value::Float(value) => Ok(Value::Float(-value)),
             _ => Err(RuntimeError::new(
                 "Type error",
                 "Invalid type for negation".to_string(),
@@ -182,7 +182,7 @@ impl Display for Value {
         match self {
             Value::Unit => f.write_str("Unit"),
             Value::Bool(value) => f.write_str(if *value { "true" } else { "false" }),
-            Value::Number(value) => Display::fmt(value, f),
+            Value::Float(value) => Display::fmt(value, f),
             Value::Fn { .. } => f.write_str("fn"),
             Value::Array(values) => {
                 f.write_char('[')?;
