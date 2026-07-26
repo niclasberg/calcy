@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 ariadne = "0.6.0"
 bumpalo = "3.20.3"
+intervalsets = "0.1.0-alpha.2"
 lasso = "0.7.3"
 slotmap = "1.1.1"
 winnow = "1.0.3"

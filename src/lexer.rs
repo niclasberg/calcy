@@ -122,6 +122,7 @@ pub enum Keyword {
     If,
     Then,
     Else,
+    Match,
     Fn,
     Let,
     Int,
@@ -130,11 +131,14 @@ pub enum Keyword {
 }
 
 impl Keyword {
+    pub const MATCH: &'static str = "match";
+
     pub const fn as_str(&self) -> &'static str {
         match self {
             Keyword::If => "if",
             Keyword::Else => "else",
             Keyword::Then => "then",
+            Keyword::Match => Self::MATCH,
             Keyword::Fn => "fn",
             Keyword::Let => "let",
             Keyword::Int => "Int",
@@ -259,6 +263,7 @@ fn identifier_or_keyword<'s>(i: &mut &'s str) -> Result<TokenKind<'s>> {
             "if" => TokenKind::Keyword(Keyword::If),
             "else" => TokenKind::Keyword(Keyword::Else),
             "then" => TokenKind::Keyword(Keyword::Then),
+            Keyword::MATCH => TokenKind::Keyword(Keyword::Match),
             "fn" => TokenKind::Keyword(Keyword::Fn),
             "let" => TokenKind::Keyword(Keyword::Let),
             "true" => TokenKind::Literal(Literal::Bool(true)),

@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Display};
 
 use crate::{
     atom::Atom,
-    expr::{ArrayElem, BinaryOp, ExprId, ExprKind, Expressions, UnaryOp},
+    expr::{BinaryOp, ExprId, ExprKind, Expressions, UnaryOp},
     lexer::SourceSpan,
     value::{Value, ValueType},
 };
@@ -78,35 +78,23 @@ pub fn eval(
             }
             Ok(Value::Array(values))
         }
-        ExprKind::Binary { op, lhs, rhs } => {
-            let rhs = eval(*rhs, expressions, cx)?;
-            if op == &BinaryOp::Assign {
-                let id_expr = &expressions[*lhs];
-                let identifier = match &id_expr.kind {
-                    ExprKind::Identifier(id) => *id,
-                    _ => {
-                        return Err(RuntimeError::new(
-                            "Expected identifier",
-                            format!("Expected identifier, found {}", op),
-                            id_expr.span,
-                        ));
-                    }
-                };
-
-                if !cx.has_symbol(identifier) {
-                    return Err(RuntimeError::new(
-                        "Undefined symbol",
-                        format!("Symbol {} not defined in the current scope", "asdf"),
-                        id_expr.span,
-                    ));
-                }
-
-                cx.set_symbol(identifier, rhs);
-                return Ok(Value::Unit);
+        ExprKind::Record(_) => todo!(),
+        ExprKind::Index { index_expr, source } => {
+            let arr = eval(*source, expressions, cx)?;
+            let index = eval(*index_expr, expressions, cx)?;
+            let Value::Array(values) = arr else {
+                return Err(RuntimeError::new(
+                    "Type error",
+                    "Expected array".to_string(),
+                    expressions[*source].span,
+                ));
             };
-
+            let i = index.try_as_int(expressions[*index_expr].span)?;
+            Ok(values[i as usize].clone())
+        }
+        ExprKind::Binary { op, lhs, rhs } => {
             let lhs = eval(*lhs, expressions, cx)?;
-
+            let rhs = eval(*rhs, expressions, cx)?;
             match op {
                 BinaryOp::Add => lhs.try_add(&rhs, expr.span),
                 BinaryOp::Sub => lhs.try_sub(&rhs, expr.span),
@@ -118,7 +106,6 @@ pub fn eval(
                 BinaryOp::LessEq => lhs.leq(&rhs, expr.span).map(Value::Bool),
                 BinaryOp::Greater => lhs.gt(&rhs, expr.span).map(Value::Bool),
                 BinaryOp::GreaterEq => lhs.geq(&rhs, expr.span).map(Value::Bool),
-                BinaryOp::Assign => unreachable!(),
             }
         }
         ExprKind::Unary { op, operand } => {
@@ -212,6 +199,10 @@ pub fn eval(
             } else {
                 eval(*rhs, expressions, cx)
             }
+        }
+        ExprKind::Match { value_expr } => {
+            let value = eval(*value_expr, expressions, cx)?;
+            Ok(value)
         }
     }
 }

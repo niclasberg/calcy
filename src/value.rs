@@ -9,6 +9,7 @@ use crate::{atom::Atom, eval::RuntimeError, expr::ExprId, lexer::SourceSpan};
 pub enum ValueType {
     Unit,
     Bool,
+    Int,
     Float,
     Array,
     Fn,
@@ -19,7 +20,8 @@ impl Display for ValueType {
         match self {
             Self::Unit => f.write_str("Unit"),
             Self::Bool => f.write_str("Bool"),
-            Self::Float => f.write_str("Number"),
+            Self::Float => f.write_str("Float"),
+            Self::Int => f.write_str("Int"),
             Self::Array => f.write_str("Array"),
             Self::Fn => f.write_str("fn"),
         }
@@ -30,6 +32,7 @@ impl Display for ValueType {
 pub enum Value {
     Unit,
     Bool(bool),
+    Int(i64),
     Float(f64),
     Fn {
         args: Vec<Atom>,
@@ -44,9 +47,22 @@ impl Value {
         match self {
             Value::Unit => ValueType::Unit,
             Value::Bool(_) => ValueType::Bool,
+            Value::Int(_) => ValueType::Int,
             Value::Float(_) => ValueType::Float,
             Value::Fn { .. } => ValueType::Fn,
             Value::Array(..) => ValueType::Array,
+        }
+    }
+
+    pub fn try_as_int(&self, span: SourceSpan) -> Result<i64, RuntimeError> {
+        if let Value::Float(value) = self {
+            Ok(*value as i64)
+        } else {
+            Err(RuntimeError::new(
+                "Type error",
+                "Could not convert value to int".to_string(),
+                span,
+            ))
         }
     }
 
@@ -183,6 +199,7 @@ impl Display for Value {
             Value::Unit => f.write_str("Unit"),
             Value::Bool(value) => f.write_str(if *value { "true" } else { "false" }),
             Value::Float(value) => Display::fmt(value, f),
+            Value::Int(value) => Display::fmt(value, f),
             Value::Fn { .. } => f.write_str("fn"),
             Value::Array(values) => {
                 f.write_char('[')?;

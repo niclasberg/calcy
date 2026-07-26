@@ -5,14 +5,16 @@ use crate::{
     expr::Expressions,
     lexer::{SourceSpan, tokens},
     parse_expr::{ParseError, ParseErrorKind, parse},
-    types::{TypeContext, TypeError, TypeErrorKind, infer},
+    type_checker::{TypeContext, TypeError, TypeErrorKind, infer},
 };
 
 mod atom;
 mod eval;
 mod expr;
+mod interval;
 mod lexer;
 mod parse_expr;
+mod type_checker;
 mod types;
 mod value;
 
@@ -75,16 +77,18 @@ fn main() {
     let source = "
         let a = 2 + -2; 
         let k = a + 1; 
-        let dd = true;
-        dd = false;
-        let f = fn(a: Float, b: Float): (Float) => [Bool | Float] (
-            fn(k): [Float] (
+        let a: true = false;
+        let dd = [true][0];
+        let f = fn(a: Float, b: Float): (Float) => [Bool | Float] {
+            fn(k) {
                 let d = a + b + k; 
                 let arr = [10, true];
-                [b, k, d<a, ..arr, false]
-            )
-        ); 
-        if a < k then f(15, 4)(40) else [true]
+                [b, k, d<a, ..arr, true]
+            }
+        }; 
+        {
+            a: if a < k then f(15, 4)(40) else [true],
+        }
     ";
     let tokens = tokens(source).unwrap();
     let mut exprs = Expressions::new();

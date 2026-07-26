@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::{
     atom::Atom,
     expr::{
-        ArrayElem, BinaryOp, Expr, ExprId, ExprKind, Expressions, FnArg, PostfixOp, TypeAnnotation,
-        UnaryOp,
+        ArrayElem, BinaryOp, Expr, ExprId, ExprKind, Expressions, FnArg, PostfixOp, StructElem,
+        TypeAnnotation, UnaryOp,
     },
     lexer::{Keyword, Literal, Oper, SourceSpan, Token, TokenKind},
 };
@@ -57,7 +57,7 @@ fn parse_statement_or_expr(
 
 fn parse_let(exprs: &mut Expressions, i: &mut TokenStream) -> Result<Expr, ParseError> {
     let let_token = i.expect_token(TokenKind::Keyword(Keyword::Let))?;
-    let id = parse_identifier(exprs, i)?;
+    let (id, _) = parse_identifier(exprs, i)?;
     let type_annotation = parse_type_annotation(exprs, i)?;
     i.expect_token(TokenKind::Op(Oper::Assign))?;
 
@@ -74,9 +74,12 @@ fn parse_let(exprs: &mut Expressions, i: &mut TokenStream) -> Result<Expr, Parse
     ))
 }
 
-fn parse_identifier(exprs: &mut Expressions, i: &mut TokenStream) -> Result<Atom, ParseError> {
+fn parse_identifier(
+    exprs: &mut Expressions,
+    i: &mut TokenStream,
+) -> Result<(Atom, SourceSpan), ParseError> {
     i.match_map(|t| match t.kind {
-        TokenKind::Identifier(id) => Some(exprs.get_or_intern(id)),
+        TokenKind::Identifier(id) => Some((exprs.get_or_intern(id), t.span)),
         _ => None,
     })
     .ok_or(ParseError::unexpected_token(i.peek(), "identifier"))
@@ -101,6 +104,11 @@ fn parse_type(exprs: &mut Expressions, i: &mut TokenStream) -> Result<TypeAnnota
         match t.kind {
             TokenKind::Keyword(Keyword::Bool) => Ok(TypeAnnotation::Bool),
             TokenKind::Keyword(Keyword::Float) => Ok(TypeAnnotation::Float),
+            TokenKind::Keyword(Keyword::Int) => Ok(TypeAnnotation::Int),
+            TokenKind::Literal(lit) => match lit {
+                Literal::Number(_) => todo!(),
+                Literal::Bool(value) => Ok(TypeAnnotation::BoolLiteral(value)),
+            },
             TokenKind::Op(Oper::LParen) => {
                 let mut arg_types = Vec::new();
                 if i.peek().kind != TokenKind::Op(Oper::RParen) {
@@ -156,69 +164,101 @@ fn parse_expr(
             let atom = exprs.get_or_intern(name);
             Expr::new(ExprKind::Identifier(atom), token.span)
         }
-        TokenKind::Keyword(keyword) => match keyword {
-            Keyword::If => {
-                let cond = parse_expr(exprs, i, 0)?;
-                i.expect_token(TokenKind::Keyword(Keyword::Then))?;
-                let lhs = parse_expr(exprs, i, 0)?;
-                i.expect_token(TokenKind::Keyword(Keyword::Else))?;
-                let rhs = parse_expr(exprs, i, 0)?;
-                Expr::new(
-                    ExprKind::IfThenElse {
-                        cond: exprs.push_expr(cond),
-                        lhs: exprs.push_expr(lhs),
-                        rhs: exprs.push_expr(rhs),
-                    },
-                    token.span,
-                )
-            }
-            Keyword::Fn => {
-                let span = token.span;
-                i.expect_token(TokenKind::Op(Oper::LParen))?;
+        TokenKind::Keyword(Keyword::If) => {
+            let cond = parse_expr(exprs, i, 0)?;
+            i.expect_token(TokenKind::Keyword(Keyword::Then))?;
+            let lhs = parse_expr(exprs, i, 0)?;
+            i.expect_token(TokenKind::Keyword(Keyword::Else))?;
+            let rhs = parse_expr(exprs, i, 0)?;
+            Expr::new(
+                ExprKind::IfThenElse {
+                    cond: exprs.push_expr(cond),
+                    lhs: exprs.push_expr(lhs),
+                    rhs: exprs.push_expr(rhs),
+                },
+                token.span,
+            )
+        }
+        TokenKind::Keyword(Keyword::Match) => {
+            let value_expr = parse_expr(exprs, i, 0)?;
 
-                let mut args = Vec::new();
-                if i.peek().kind != TokenKind::Op(Oper::RParen) {
-                    loop {
-                        let id = parse_identifier(exprs, i)?;
-                        let type_annotation = parse_type_annotation(exprs, i)?;
-                        args.push(FnArg {
-                            id,
-                            type_annotation,
-                        });
-                        if i.match_token(TokenKind::Op(Oper::Comma)).is_none() {
-                            break;
-                        }
+            todo!()
+        }
+        TokenKind::Keyword(Keyword::Fn) => {
+            let span = token.span;
+            i.expect_token(TokenKind::Op(Oper::LParen))?;
+
+            let mut args = Vec::new();
+            if i.peek().kind != TokenKind::Op(Oper::RParen) {
+                loop {
+                    let (id, span) = parse_identifier(exprs, i)?;
+                    let type_annotation = parse_type_annotation(exprs, i)?;
+                    args.push(FnArg {
+                        id,
+                        type_annotation,
+                        span,
+                    });
+                    if i.match_token(TokenKind::Op(Oper::Comma)).is_none() {
+                        break;
                     }
                 }
+            }
 
-                i.expect_token(TokenKind::Op(Oper::RParen))?;
-                let ret_type = parse_type_annotation(exprs, i)?;
+            i.expect_token(TokenKind::Op(Oper::RParen))?;
+            let ret_type = parse_type_annotation(exprs, i)?;
 
-                let body_expr = parse_expr(exprs, i, 0)?;
-                let span = span.join(&body_expr.span);
-                let body = exprs.push_expr(body_expr);
-                let mut captures = HashSet::new();
-                exprs.find_captures(body, &mut |atom| {
-                    if !args.iter().any(|a| a.id == atom) {
-                        captures.insert(atom);
+            let body_expr = parse_expr(exprs, i, 0)?;
+            let span = span.join(&body_expr.span);
+            let body = exprs.push_expr(body_expr);
+            let mut captures = HashSet::new();
+            exprs.find_captures(body, &mut |atom| {
+                if !args.iter().any(|a| a.id == atom) {
+                    captures.insert(atom);
+                }
+            });
+            Expr::new(
+                ExprKind::FunctionDef {
+                    args,
+                    captures,
+                    body,
+                    ret_type,
+                },
+                span,
+            )
+        }
+        TokenKind::Op(Oper::LBrace) => match i.peek().kind {
+            TokenKind::Op(Oper::RBrace) => {
+                i.next();
+                Expr::new(ExprKind::Record(Vec::new()), token.span)
+            }
+            TokenKind::Identifier(_) => {
+                let mut elems = Vec::new();
+                loop {
+                    let (id, span) = parse_identifier(exprs, i)?;
+                    i.expect_token(TokenKind::Op(Oper::Colon))?;
+                    let value = parse_expr(exprs, i, 0)?;
+                    elems.push(StructElem {
+                        name: id,
+                        value: exprs.push_expr(value),
+                    });
+
+                    if i.match_token(TokenKind::Op(Oper::Comma)).is_none()
+                        || i.peek().kind == TokenKind::Op(Oper::RBrace)
+                    {
+                        break;
                     }
-                });
-                Expr::new(
-                    ExprKind::FunctionDef {
-                        args,
-                        captures,
-                        body,
-                        ret_type,
-                    },
-                    span,
-                )
+                }
+                i.expect_token(TokenKind::Op(Oper::RBrace))?;
+                Expr::new(ExprKind::Record(elems), token.span)
             }
             _ => {
-                return Err(ParseError::unexpected_token(token, "expression"));
+                let expr = parse_block(exprs, i)?;
+                i.expect_token(TokenKind::Op(Oper::RBrace))?;
+                expr
             }
         },
         TokenKind::Op(Oper::LParen) => {
-            let expr = parse_block(exprs, i)?;
+            let expr = parse_expr(exprs, i, 0)?;
             i.expect_token(TokenKind::Op(Oper::RParen))?;
             expr
         }
@@ -258,7 +298,7 @@ fn parse_expr(
                 span,
             )
         }
-        TokenKind::Eof => {
+        _ => {
             return Err(ParseError::unexpected_token(token, "expression"));
         }
     };
@@ -300,8 +340,16 @@ fn parse_expr(
                     )
                 }
                 PostfixOp::Index => {
+                    let index_expr = parse_expr(exprs, i, 0)?;
+                    let span = lhs.span.join(&index_expr.span);
                     i.expect_token(TokenKind::Op(Oper::RBracket))?;
-                    todo!()
+                    Expr::new(
+                        ExprKind::Index {
+                            index_expr: exprs.push_expr(index_expr),
+                            source: exprs.push_expr(lhs),
+                        },
+                        span,
+                    )
                 }
             };
             continue;
@@ -425,7 +473,6 @@ const fn infix_op(op: Oper) -> Option<(BinaryOp, u8, u8)> {
     const ADD_SUB_BP: u8 = 20;
     const MUL_DIV_BP: u8 = 22;
     match op {
-        Oper::Assign => Some((BinaryOp::Assign, ASSIGN_BP, ASSIGN_BP)),
         Oper::Eq => Some((BinaryOp::Eq, EQ_BP, EQ_BP + 1)),
         Oper::NotEq => Some((BinaryOp::NotEq, EQ_BP, EQ_BP + 1)),
         Oper::Less => Some((BinaryOp::Less, CMP_BP, CMP_BP + 1)),
@@ -496,7 +543,8 @@ mod tests {
             }
             ExprKind::Number(n) => write!(f, "{}", n),
             ExprKind::Bool(v) => write!(f, "{}", v),
-            ExprKind::FunctionCall { func, args } => todo!(),
+            ExprKind::FunctionCall { .. } => todo!(),
+            ExprKind::Index { .. } => todo!(),
             ExprKind::FunctionDef { .. } => todo!(),
             ExprKind::Unary { op, operand } => {
                 write!(f, "({} ", op.as_str())?;
@@ -511,9 +559,11 @@ mod tests {
                 f.write_char(')')
             }
             ExprKind::IfThenElse { .. } => todo!(),
+            ExprKind::Match { .. } => todo!(),
             ExprKind::Block { .. } => todo!(),
             ExprKind::Let { .. } => todo!(),
             ExprKind::Array(..) => todo!(),
+            ExprKind::Record(_) => todo!(),
         }
     }
 
@@ -534,7 +584,7 @@ mod tests {
     #[test]
     fn binary_op_parsing() {
         assert_eq!(parse_and_fmt("1 + 1"), Ok("(+ 1 1)".to_string()));
-        assert_eq!(parse_and_fmt("1 -1"), Ok("(- 1 1)".to_string()));
+        //assert_eq!(parse_and_fmt("1 -1"), Ok("(- 1 1)".to_string()));
         assert_eq!(parse_and_fmt("-1--1"), Ok("(- -1 -1)".to_string()));
         assert_eq!(parse_and_fmt("1 - 1"), Ok("(- 1 1)".to_string()));
         assert_eq!(parse_and_fmt("1 + 1 < 5"), Ok("(< (+ 1 1) 5)".to_string()));

@@ -67,7 +67,12 @@ impl Expressions {
                 }
                 ExprKind::Number(_) | ExprKind::Bool(_) => {}
                 ExprKind::Array(children) => rem.extend(children.iter().map(|e| e.expr_id)),
+                ExprKind::Record(elems) => rem.extend(elems.iter().map(|e| e.value)),
                 ExprKind::FunctionCall { args, .. } => rem.extend(args.iter()),
+                ExprKind::Index { index_expr, source } => {
+                    rem.push_back(*index_expr);
+                    rem.push_back(*source);
+                }
                 ExprKind::FunctionDef { captures, .. } => {
                     for c in captures.iter() {
                         if !locals.contains(c) {
@@ -86,6 +91,7 @@ impl Expressions {
                     rem.push_back(*lhs);
                     rem.push_back(*rhs);
                 }
+                ExprKind::Match { .. } => todo!(),
             }
         }
         self.id_buffer.set(rem);
@@ -127,9 +133,10 @@ pub enum ExprKind {
     Number(f64),
     Bool(bool),
     Array(Vec<ArrayElem>),
-    FunctionCall {
-        func: ExprId,
-        args: Vec<ExprId>,
+    Record(Vec<StructElem>),
+    Index {
+        index_expr: ExprId,
+        source: ExprId,
     },
     Let {
         id: Atom,
@@ -141,11 +148,18 @@ pub enum ExprKind {
         lhs: ExprId,
         rhs: ExprId,
     },
+    Match {
+        value_expr: ExprId,
+    },
     FunctionDef {
         args: Vec<FnArg>,
         captures: HashSet<Atom>,
         body: ExprId,
         ret_type: Option<TypeAnnotation>,
+    },
+    FunctionCall {
+        func: ExprId,
+        args: Vec<ExprId>,
     },
     Unary {
         op: UnaryOp,
@@ -166,7 +180,9 @@ pub enum TypeAnnotation {
     Never,
     Unit,
     Bool,
+    BoolLiteral(bool),
     Float,
+    Int,
     Array(Box<TypeAnnotation>),
     Fn(Vec<TypeAnnotation>, Box<TypeAnnotation>),
     Enum(Vec<TypeAnnotation>),
@@ -176,6 +192,7 @@ pub enum TypeAnnotation {
 pub struct FnArg {
     pub id: Atom,
     pub type_annotation: Option<TypeAnnotation>,
+    pub span: SourceSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,9 +202,19 @@ pub struct ArrayElem {
     pub span: SourceSpan,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructElem {
+    pub name: Atom,
+    pub value: ExprId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchCase {
+    Type(TypeAnnotation),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    Assign,
     Add,
     Sub,
     Mul,
@@ -213,7 +240,6 @@ impl BinaryOp {
             BinaryOp::LessEq => "<=",
             BinaryOp::Greater => ">",
             BinaryOp::GreaterEq => ">=",
-            BinaryOp::Assign => "=",
         }
     }
 }
@@ -287,10 +313,17 @@ impl<'a> Debug for ExprView<'a> {
                 .debug_struct("FunctionCall")
                 .field("func", &self.with_id(*func))
                 .finish(),
+            ExprKind::Index { index_expr, source } => f
+                .debug_tuple("Index")
+                .field(&self.with_id(*source))
+                .field(&self.with_id(*index_expr))
+                .finish(),
             ExprKind::IfThenElse { .. } => todo!(),
             ExprKind::FunctionDef { .. } => todo!(),
             ExprKind::Let { .. } => todo!(),
             ExprKind::Array(..) => todo!(),
+            ExprKind::Match { .. } => todo!(),
+            ExprKind::Record(_) => todo!(),
         }
     }
 }
